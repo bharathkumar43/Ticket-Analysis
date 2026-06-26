@@ -1,0 +1,49 @@
+
+> migrationops-backend@1.0.0 dev
+> nodemon --exec ts-node src/server.ts
+
+[33m[nodemon] 3.1.14[39m
+[33m[nodemon] to restart at any time, enter `rs`[39m
+[33m[nodemon] watching path(s): src\**\*[39m
+[33m[nodemon] watching extensions: ts,json[39m
+[32m[nodemon] starting `ts-node src/server.ts`[39m
+MigrationOps API running on http://localhost:3002
+Jira sync scheduled: 0 */6 * * *
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/server.ts`[39m
+MigrationOps API running on http://localhost:3002
+Jira sync scheduled: 0 */6 * * *
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/server.ts`[39m
+Error: listen EADDRINUSE: address already in use :::3002
+    at Server.setupListenHandle [as _listen2] (node:net:2009:16)
+    at listenInCluster (node:net:2066:12)
+    at Server.listen (node:net:2171:7)
+    at app.listen (C:\Users\BharathTummaganti\OneDrive - CloudFuze, Inc\Documents\MigrationOps-App-Spec\backend\node_modules\express\lib\application.js:635:24)
+    at Object.<anonymous> (C:\Users\BharathTummaganti\OneDrive - CloudFuze, Inc\Documents\MigrationOps-App-Spec\backend\src\server.ts:9:5)
+    at Module._compile (node:internal/modules/cjs/loader:1854:14)
+    at Module.m._compile (C:\Users\BharathTummaganti\OneDrive - CloudFuze, Inc\Documents\MigrationOps-App-Spec\backend\node_modules\ts-node\src\index.ts:1618:23)
+    at node:internal/modules/cjs/loader:1985:10
+    at Object.require.extensions.<computed> [as .ts] (C:\Users\BharathTummaganti\OneDrive - CloudFuze, Inc\Documents\MigrationOps-App-Spec\backend\node_modules\ts-node\src\index.ts:1621:12)
+    at Module.load (node:internal/modules/cjs/loader:1577:32) {
+  code: 'EADDRINUSE',
+  errno: -4091,
+  syscall: 'listen',
+  address: '::',
+  port: 3002
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/server.ts`[39m
+MigrationOps API running on http://localhost:3002
+Jira sync scheduled: 0 */6 * * *
+[Jira] testConnection — baseUrl=https://cf2020.atlassian.net email=Bharath.Tummaganti@cloudfuze.com tokenLen=192 tokenStart=ATATT3xF
+[Jira testConnection] status=401 body="Client must be authenticated to access this resource."
+Running scheduled Jira sync...
+[Jira] testConnection — baseUrl=https://cf2020.atlassian.net email=Bharath.Tummaganti@cloudfuze.com tokenLen=192 tokenStart=ATATT3xF
+[Jira testConnection] status=401 body="Client must be authenticated to access this resource."
+Scheduled sync failed: Error: Jira authentication failed: HTTP 401: Client must be authenticated to access this resource.. Regenerate your API token at id.atlassian.com/manage-profile/security/api-tokens and update JIRA_API_TOKEN in backend/.env.
+    at JiraService.runSync (C:\Users\BharathTummaganti\OneDrive - CloudFuze, Inc\Documents\MigrationOps-App-Spec\backend\src\services\jiraService.ts:80:13)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async Task._execution (C:\Users\BharathTummaganti\OneDrive - CloudFuze, Inc\Documents\MigrationOps-App-Spec\backend\src\server.ts:29:7)
