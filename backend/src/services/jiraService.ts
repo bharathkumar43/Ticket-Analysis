@@ -11,13 +11,16 @@ const FIELDS = [
 ]
 
 export class JiraService {
-  private getClient(): AxiosInstance {
+  private getClient(overrides?: { email?: string; token?: string; baseUrl?: string }): AxiosInstance {
     const config = getJiraConfig()
-    const token = Buffer.from(`${config.email}:${config.token}`).toString('base64')
+    const email   = overrides?.email   || config.email
+    const token   = overrides?.token   || config.token
+    const baseUrl = overrides?.baseUrl || config.baseUrl
+    const auth    = Buffer.from(`${email}:${token}`).toString('base64')
     return axios.create({
-      baseURL: config.baseUrl,
+      baseURL: baseUrl,
       headers: {
-        Authorization: `Basic ${token}`,
+        Authorization: `Basic ${auth}`,
         Accept: 'application/json',
       },
       timeout: 30000,
@@ -253,6 +256,151 @@ export class JiraService {
       update: data,
       create: { jiraKey: issue.key, ...data },
     })
+  }
+
+  // ── Calendar-day SLA thresholds (matches jira-dashboard frontend) ──────────
+  private static readonly SLA_DAYS: Record<string, number> = {
+    Highest: 1, High: 2, Medium: 5, Low: 10, Lowest: 14,
+  }
+
+  private normalizeIssue(issue: any, fieldMap: any): any {
+    const f   = issue.fields
+    const key = issue.key as string
+    const project = key.includes('-') ? key.split('-')[0].toUpperCase() : ''
+
+    const priority   = f.priority?.name   || 'Medium'
+    const status     = f.status?.name     || ''
+    const resolution = f.resolution?.name || ''
+
+    const DONE = new Set(['done', 'resolved', 'closed', 'fixed', 'completed'])
+    const isResolved = DONE.has(resolution.toLowerCase()) || DONE.has(status.toLowerCase())
+
+    const createdAt  = f.created         ? new Date(f.created)         : null
+    const resolvedAt = f.resolutiondate  ? new Date(f.resolutiondate)  : null
+
+    let resolutionDays: number | null = null
+    if (createdAt) {
+      const endMs = (isResolved && resolvedAt) ? resolvedAt.getTime() : Date.now()
+      const diffMs = endMs - createdAt.getTime()
+      if (diffMs >= 0) resolutionDays = Math.round((diffMs / 86400000) * 10) / 10
+    }
+
+    const threshold = JiraService.SLA_DAYS[priority] ?? 5
+    const slaBreached = resolutionDays !== null && resolutionDays > threshold ? 'Yes' : 'No'
+
+    const combination = f[fieldMap.combination] || ''
+
+    return {
+      key,
+      summary:       f.summary                    || '',
+      assignee:      f.assignee?.displayName       || 'Unassigned',
+      priority,
+      status,
+      issueType:     f.issuetype?.name             || 'Task',
+      combination,
+      resolutionDays,
+      slaBreached,
+      createdAt,
+      resolvedAt,
+      project,
+    }
+  }
+
+  /** Fetch issues live from Jira (no DB) — returns rows in the same shape as parseExcelFile */
+  async fetchLiveIssues(jql: string, maxResults = 500, creds?: { email: string; token: string; baseUrl: string }): Promise<{ rows: any[]; jql: string; warnings: string[] }> {
+    const config = getJiraConfig()
+    const effectiveBaseUrl = creds?.baseUrl || config.baseUrl
+    const effectiveEmail   = creds?.email   || config.email
+    const effectiveToken   = creds?.token   || config.token
+
+    if (!effectiveBaseUrl || !effectiveEmail || !effectiveToken) {
+      throw new Error('Jira credentials missing. Enter your Jira Base URL, email and API token in the Connect form.')
+    }
+
+    const client = this.getClient(creds)
+    const fields = [
+      'issuetype', 'summary', 'assignee', 'priority', 'status',
+      'resolution', 'created', 'updated', 'resolutiondate',
+      config.fieldMap.combination,
+    ]
+
+    const rows: any[] = []
+    let nextPageToken: string | undefined
+
+    do {
+      const body: Record<string, unknown> = {
+        jql,
+        maxResults: Math.min(100, maxResults - rows.length),
+        fields,
+      }
+      if (nextPageToken) body.nextPageToken = nextPageToken
+
+      const res  = await client.post('/rest/api/3/search/jql', body)
+      const data = res.data
+
+      if (!data.issues) {
+        const msgs: string[] = [
+          ...(data.errorMessages ?? []),
+          ...Object.values(data.errors ?? {}),
+        ]
+        throw new Error(`Jira API error: ${msgs.join('; ') || JSON.stringify(data)}`)
+      }
+
+      for (const issue of data.issues) {
+        rows.push(this.normalizeIssue(issue, config.fieldMap))
+      }
+
+      nextPageToken = data.nextPageToken || undefined
+    } while (nextPageToken && rows.length < maxResults)
+
+    const warnings: string[] = []
+    if (rows.length >= maxResults) warnings.push(`Showing first ${maxResults} tickets — refine your JQL to narrow results.`)
+
+    return { rows, jql, warnings }
+  }
+
+  /** Fetch full changelog for a single ticket — returns status + assignee history with durations */
+  async fetchIssueChangelog(key: string, creds?: { email: string; token: string; baseUrl: string }): Promise<any> {
+    const client = this.getClient(creds)
+
+    const issueRes = await client.get(
+      `/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,status,assignee,created,priority,resolution,resolutiondate`
+    )
+    const f = issueRes.data.fields
+
+    // Paginate changelog (Jira Cloud returns up to 100 per page)
+    const allHistory: any[] = []
+    let startAt = 0
+    while (true) {
+      const clRes = await client.get(
+        `/rest/api/3/issue/${encodeURIComponent(key)}/changelog`,
+        { params: { startAt, maxResults: 100 } }
+      )
+      allHistory.push(...clRes.data.values)
+      if (clRes.data.isLast || allHistory.length >= clRes.data.total) break
+      startAt += 100
+    }
+
+    return {
+      key,
+      summary:   f.summary              || '',
+      status:    f.status?.name         || '',
+      assignee:  f.assignee?.displayName || 'Unassigned',
+      priority:  f.priority?.name       || 'Medium',
+      createdAt: f.created              || null,
+      changelog: allHistory.map((h: any) => ({
+        id:      h.id,
+        created: h.created,
+        author:  { displayName: h.author?.displayName || 'System' },
+        items:   (h.items as any[])
+          .filter((it) => it.field === 'status' || it.field === 'assignee')
+          .map((it) => ({
+            field:      it.field,
+            fromString: it.fromString,
+            toString:   it.toString,
+          })),
+      })).filter((h: any) => h.items.length > 0),
+    }
   }
 
   async getStatus() {

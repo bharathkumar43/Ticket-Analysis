@@ -16,7 +16,15 @@ import { authMiddleware } from './middleware/auth'
 
 const app = express()
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:5173', credentials: true }))
+const _allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174')
+  .split(',').map(s => s.trim()).filter(Boolean)
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || _allowedOrigins.includes(origin)) cb(null, true)
+    else cb(new Error(`CORS: ${origin} not allowed`))
+  },
+  credentials: true,
+}))
 app.use(express.json())
 
 // Public routes

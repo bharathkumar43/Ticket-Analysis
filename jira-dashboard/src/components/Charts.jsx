@@ -37,7 +37,7 @@ export function BarChartCard({ data, color = COLORS[0], horizontal = false, heig
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} layout={layout} margin={{ top: 4, right: 16, bottom: 4, left: horizontal ? 120 : 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} />
+        <CartesianGrid vertical={false} stroke="#e2e8f0" strokeOpacity={0.4} />
         {horizontal ? (
           <>
             <XAxis type="number" tick={{ fill: AXIS_COLOR, fontSize: 12 }} />

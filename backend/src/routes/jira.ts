@@ -54,4 +54,52 @@ router.get('/test', async (req, res) => {
   res.json(result)
 })
 
+// Extract per-request Jira credentials from headers (override .env values)
+function extractCreds(req: any): { email: string; token: string; baseUrl: string } | undefined {
+  const email   = req.headers['x-jira-email']   as string | undefined
+  const token   = req.headers['x-jira-token']   as string | undefined
+  const baseUrl = req.headers['x-jira-baseurl'] as string | undefined
+  if (email && token && baseUrl) return { email, token, baseUrl }
+  return undefined
+}
+
+// Fetch issues live from Jira (no DB write) — returns rows in parseExcelFile format
+router.get('/live-issues', async (req, res) => {
+  const creds = extractCreds(req)
+  if (!creds && !jiraService.isConfigured()) {
+    res.status(400).json({ error: { code: 'JIRA_NOT_CONFIGURED', message: 'Enter your Jira email, API token and base URL in the Connect form.' } })
+    return
+  }
+  const { jql } = req.query as { jql?: string }
+  if (!jql?.trim()) {
+    res.status(400).json({ error: { code: 'MISSING_JQL', message: 'jql query parameter is required' } })
+    return
+  }
+  try {
+    const result = await jiraService.fetchLiveIssues(jql.trim(), 500, creds)
+    res.json(result)
+  } catch (err: any) {
+    const msg = err?.message || 'Fetch failed'
+    const isAuth = msg.includes('401') || msg.includes('authentication') || msg.includes('Client must be authenticated')
+    res.status(isAuth ? 502 : 500).json({ error: { code: isAuth ? 'JIRA_AUTH_FAILED' : 'FETCH_ERROR', message: msg } })
+  }
+})
+
+// Return full status + assignee changelog for a single ticket
+router.get('/issue/:key/changelog', async (req, res) => {
+  const creds = extractCreds(req)
+  if (!creds && !jiraService.isConfigured()) {
+    res.status(400).json({ error: { code: 'JIRA_NOT_CONFIGURED', message: 'Enter your Jira email, API token and base URL in the Connect form.' } })
+    return
+  }
+  const { key } = req.params
+  try {
+    const result = await jiraService.fetchIssueChangelog(key, creds)
+    res.json(result)
+  } catch (err: any) {
+    const msg = err?.message || 'Changelog fetch failed'
+    res.status(500).json({ error: { code: 'CHANGELOG_ERROR', message: msg } })
+  }
+})
+
 export default router
