@@ -114,7 +114,7 @@ export default function App() {
         ))}
       </div>
 
-      {tab === "Tickets Resolved" && <TicketsResolved rows={rows} />}
+      {tab === "Tickets Resolved" && <TicketsResolved rows={rows} jiraUrl={jiraCtx?.jiraCreds?.baseUrl || JIRA_BASE_URL} onHistory={jiraCtx ? openHistory : null} />}
       {tab === "Assignee with SLA" && <AssigneeSLA rows={rows} jiraUrl={jiraCtx?.jiraCreds?.baseUrl || JIRA_BASE_URL} onHistory={jiraCtx ? openHistory : null} />}
       {tab === "Ticket Ageing"       && <TicketAgeing rows={rows} jiraUrl={jiraCtx?.jiraCreds?.baseUrl || JIRA_BASE_URL} onHistory={jiraCtx ? openHistory : null} />}
       {tab === "Engineer Patterns"   && <EngineerPatterns rows={rows} />}
@@ -168,14 +168,17 @@ function Table({ title, head, rows }) {
 /* ===================================================================
    SHEET 1 — Tickets Resolved
    =================================================================== */
-function TicketsResolved({ rows }) {
-  const total     = rows.length;
-  const resolved  = count(rows, (r) => isResolved(r));
-  const open      = total - resolved;
-  const breached  = count(rows, (r) => r.slaBreached === "Yes");
-  const bugs      = count(rows, (r) => r.issueType === "Bug");
-  const operational = count(rows, (r) => ["Task", "Sub-task", "Story"].includes(r.issueType));
-  const totalPerfTickets   = MEMBER_PERFORMANCE.reduce((s, p) => s + p.tickets, 0);
+function TicketsResolved({ rows, jiraUrl, onHistory }) {
+  const [kpiDrill, setKpiDrill] = useState(null); // { title, tickets }
+
+  const resolvedRows   = rows.filter((r) => isResolved(r));
+  const openRows       = rows.filter((r) => !isResolved(r));
+  const breachedRows   = rows.filter((r) => r.slaBreached === "Yes");
+  const bugRows        = rows.filter((r) => r.issueType === "Bug");
+  const operRows       = rows.filter((r) => ["Task", "Sub-task", "Story"].includes(r.issueType));
+
+  const total       = rows.length;
+  const totalPerfTickets     = MEMBER_PERFORMANCE.reduce((s, p) => s + p.tickets, 0);
   const overallAvgInProgress = totalPerfTickets
     ? (MEMBER_PERFORMANCE.reduce((s, p) => s + p.avgInProgressHrs * p.tickets, 0) / totalPerfTickets).toFixed(2)
     : null;
@@ -185,21 +188,35 @@ function TicketsResolved({ rows }) {
   const paths     = topMigrationPaths(rows, 8);
   const assignees = topAssignees(rows, 10);
 
-  const codeVsOps   = [{ name: "Code Fixes (Bugs)", value: bugs }, { name: "Operational", value: operational }];
+  const codeVsOps   = [{ name: "Code Fixes (Bugs)", value: bugRows.length }, { name: "Operational", value: operRows.length }];
   const assigneeBar = assignees.map((a) => ({ name: a.assignee, value: a.tickets }));
+
+  function openDrill(title, tickets) {
+    setKpiDrill((prev) => (prev?.title === title ? null : { title, tickets }));
+  }
 
   return (
     <>
       <div className="kpis">
-        <Kpi icon="📥" label="Total Received"    value={num(total)}    sub="All Tickets" />
-        <Kpi icon="✅" label="Resolved"          value={num(resolved)} sub={pct(resolved, total) + " Resolution Rate"} />
-        <Kpi icon="⏳" label="Open / Pending"    value={num(open)}     sub="Not Yet Resolved" />
-        <Kpi icon="⚠️" label="SLA Breached"      value={num(breached)} sub={pct(breached, total) + " of Total"} />
-        <Kpi icon="🐛" label="Code Fixes (Bugs)" value={num(bugs)}     sub={pct(bugs, total) + " of Total"} />
-        <Kpi icon="⚙️" label="Operational"       value={num(operational)} sub="Tasks · Sub-tasks · Stories" />
-        <Kpi icon="⏱️" label="Avg In Progress"   value={overallAvgInProgress ? overallAvgInProgress + " hrs" : "—"} sub="Weighted avg hrs in progress" />
-        <Kpi icon="🔄" label="Reopened"          value="0"             sub="Not tracked in source" />
+        <Kpi icon="📥" label="Total Received"    value={num(total)}             sub="All Tickets"                        clickable active={kpiDrill?.title === "Total Received"}    onClick={() => openDrill("Total Received",    rows)}        bucketColor="green" />
+        <Kpi icon="✅" label="Resolved"          value={num(resolvedRows.length)} sub={pct(resolvedRows.length, total) + " Resolution Rate"} clickable active={kpiDrill?.title === "Resolved"}         onClick={() => openDrill("Resolved",         resolvedRows)} bucketColor="green" />
+        <Kpi icon="⏳" label="Open / Pending"    value={num(openRows.length)}    sub="Not Yet Resolved"                  clickable active={kpiDrill?.title === "Open / Pending"}    onClick={() => openDrill("Open / Pending",    openRows)}    bucketColor="amber" />
+        <Kpi icon="⚠️" label="SLA Breached"      value={num(breachedRows.length)} sub={pct(breachedRows.length, total) + " of Total"}       clickable active={kpiDrill?.title === "SLA Breached"}      onClick={() => openDrill("SLA Breached",      breachedRows)} bucketColor="red"   />
+        <Kpi icon="🐛" label="Code Fixes (Bugs)" value={num(bugRows.length)}     sub={pct(bugRows.length, total) + " of Total"}              clickable active={kpiDrill?.title === "Code Fixes (Bugs)"} onClick={() => openDrill("Code Fixes (Bugs)", bugRows)}    bucketColor="red"   />
+        <Kpi icon="⚙️" label="Operational"       value={num(operRows.length)}    sub="Tasks · Sub-tasks · Stories"       clickable active={kpiDrill?.title === "Operational"}       onClick={() => openDrill("Operational",       operRows)}    bucketColor="green" />
+        <Kpi icon="⏱️" label="Avg In Progress"   value={overallAvgInProgress ? overallAvgInProgress + " hrs" : "—"}    sub="Weighted avg hrs in progress" />
+        <Kpi icon="🔄" label="Reopened"          value="0"                       sub="Not tracked in source" />
       </div>
+
+      {kpiDrill && (
+        <SLADrillDown
+          title={kpiDrill.title}
+          tickets={kpiDrill.tickets}
+          onClose={() => setKpiDrill(null)}
+          jiraUrl={jiraUrl}
+          onHistory={onHistory}
+        />
+      )}
 
       <div className="grid">
         <div className="card"><h3>Code Fixes vs Operational</h3><PieChartCard data={codeVsOps} /></div>
