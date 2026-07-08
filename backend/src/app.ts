@@ -12,6 +12,8 @@ import analyticsRoutes from './routes/analytics'
 import jiraRoutes from './routes/jira'
 import aliasRoutes from './routes/aliases'
 import exportRoutes from './routes/export'
+import actionItemRoutes from './routes/actionItems'
+import emailSettingsRoutes from './routes/emailSettings'
 import { authMiddleware } from './middleware/auth'
 
 const app = express()
@@ -39,6 +41,8 @@ app.use('/api/analytics', authMiddleware, analyticsRoutes)
 app.use('/api/jira', authMiddleware, jiraRoutes)
 app.use('/api/aliases', authMiddleware, aliasRoutes)
 app.use('/api/export', authMiddleware, exportRoutes)
+app.use('/api/action-items', authMiddleware, actionItemRoutes)
+app.use('/api/email-settings', authMiddleware, emailSettingsRoutes)
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok' }))

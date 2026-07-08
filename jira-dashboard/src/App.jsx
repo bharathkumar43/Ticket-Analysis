@@ -1,9 +1,16 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { BarChartCard, PieChartCard } from "./components/Charts.jsx";
-import { ExcelImport, ChangeFileBar } from "./ExcelImport.jsx";
+import { ExcelImport } from "./ExcelImport.jsx";
 import { JiraConnect } from "./JiraConnect.jsx";
+import { Login } from "./Login.jsx";
 import { TicketHistory } from "./TicketHistory.jsx";
-import { loadSession } from "./jiraApi.js";
+import { ActionItems } from "./ActionItems.jsx";
+import { MigrationManagers } from "./MigrationManagers.jsx";
+import { EmailSettings } from "./EmailSettings.jsx";
+import { generateDemoData } from "./demoData.js";
+import { makeLocalActionItemsStore } from "./actionItemsStore.js";
+import { makeBackendActionItemsStore } from "./actionItemsApi.js";
+import { loadSession, clearSession } from "./jiraApi.js";
 import { TEAMS, TEAM_NAMES, teamOf } from "./teams.js";
 import { PROJECT_ESCALATIONS, projectTeam } from "./projectEscalations.js";
 import { MEMBER_PERFORMANCE, teamAvgInProgress, memberPerf } from "./memberPerformance.js";
@@ -14,13 +21,103 @@ import {
   pct, num, days, isResolved,
 } from "./utils.js";
 
-const TABS = ["Tickets Resolved", "Assignee with SLA", "Ticket Ageing", "Engineer Patterns"];
+const ANALYTICS_TABS = ["Tickets Resolved", "Assignee with SLA", "Ticket Ageing", "Engineer Patterns"];
+const MANAGER_SEGMENT_TABS = ["ENT", "SMB"];
+
+// Sections that are real, working pages in this app.
+const REAL_SECTIONS = new Set(["Ticket Analytics", "Action Items", "Notifications", "Migration Managers", "Email Settings"]);
+
+// Sidebar layout matching the reference design. Sections not in REAL_SECTIONS
+// render a "Coming soon" placeholder instead of a dead/no-op click.
+const NAV_GROUPS = [
+  { label: "", items: [{ name: "Dashboard", icon: "🏠" }] },
+  { label: "Analytics", items: [
+    { name: "MBR Analytics",      icon: "📊" },
+    { name: "SLA & Tickets",      icon: "⏱️" },
+    { name: "Ticket Analytics",   icon: "🎫" },
+    { name: "Migration Managers", icon: "🧭" },
+    { name: "Reports",            icon: "🗂️" },
+  ]},
+  { label: "Actions", items: [
+    { name: "Action Items", icon: "📋" },
+    { name: "Calendar",     icon: "📅" },
+    { name: "Notifications", icon: "🔔" },
+  ]},
+  { label: "Settings", items: [
+    { name: "Email Settings", icon: "✉️" },
+    { name: "Categories",     icon: "🏷️" },
+    { name: "Users & Roles",  icon: "👥" },
+    { name: "Integrations",   icon: "🔌" },
+  ]},
+];
+
+const TAB_ICONS = {
+  "Tickets Resolved":  "✅",
+  "Assignee with SLA": "🎯",
+  "Ticket Ageing":     "⏳",
+  "Engineer Patterns": "🧑‍💻",
+};
 
 const JIRA_BASE_URL = (import.meta.env.VITE_JIRA_BASE_URL || "").replace(/\/$/, "");
 
+function countOverdue(items) {
+  const today = new Date().toISOString().slice(0, 10);
+  return items.filter((it) => it.status !== "Resolved" && it.dueDate && it.dueDate < today).length;
+}
+
+function ComingSoon({ title, icon }) {
+  return (
+    <div className="empty-state" style={{ marginTop: 24 }}>
+      <div className="es-icon">{icon || "🚧"}</div>
+      <h3>{title}</h3>
+      <p>This section isn't built yet — it's a placeholder in the navigation for now.</p>
+    </div>
+  );
+}
+
+function NotificationsPage({ items }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const overdue = items
+    .filter((it) => it.status !== "Resolved" && it.dueDate && it.dueDate < today)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+  if (!overdue.length) {
+    return (
+      <div className="empty-state" style={{ marginTop: 24 }}>
+        <div className="es-icon">🔔</div>
+        <h3>No notifications</h3>
+        <p>You're all caught up — no overdue action items right now.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card full">
+      <h3>🔔 Overdue Action Items ({overdue.length})</h3>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Action Item</th><th>Meeting</th><th>Owner</th><th>Due Date</th></tr></thead>
+          <tbody>
+            {overdue.map((it) => (
+              <tr key={it.id}>
+                <td className="wrap">{it.title}</td>
+                <td><span className="badge b-blue">{it.meetingType}</span></td>
+                <td>{it.owner || "—"}</td>
+                <td><span className="badge b-red">{it.dueDate}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const [fileData,    setFileData]    = useState(null);
-  const [tab,         setTab]         = useState(TABS[0]);
+  const [fileData,    setFileData]    = useState(() => generateDemoData());
+  const [section,     setSection]     = useState("Ticket Analytics");
+  const [subTab,      setSubTab]      = useState(ANALYTICS_TABS[0]);
+  const [managerTab,  setManagerTab]  = useState(MANAGER_SEGMENT_TABS[0]);
   const [jiraCtx,     setJiraCtx]     = useState(() => {                // { backendUrl, beToken, jiraCreds } | null
     const s = loadSession();
     if (!s) return null;
@@ -28,40 +125,69 @@ export default function App() {
   });
   const [historyKey,  setHistoryKey]  = useState(null);
   const [landingMode, setLandingMode] = useState("choose"); // "choose" | "excel" | "jira"
+  const [itemsVersion, setItemsVersion] = useState(0); // bumped when Action Items change, to refresh overdue badge and Notifications
+  const [actionItemsSnapshot, setActionItemsSnapshot] = useState([]);
+  const [skippedLogin, setSkippedLogin] = useState(() => sessionStorage.getItem("skippedLogin") === "1");
+
+  const backendConnected = !!(jiraCtx?.backendUrl && jiraCtx?.beToken);
+
+  function handleSkipLogin() {
+    sessionStorage.setItem("skippedLogin", "1");
+    setSkippedLogin(true);
+  }
+  useEffect(() => {
+    let cancelled = false;
+    const store = backendConnected ? makeBackendActionItemsStore(jiraCtx.backendUrl, jiraCtx.beToken) : makeLocalActionItemsStore();
+    store.list().then((list) => { if (!cancelled) setActionItemsSnapshot(list); }).catch(() => { if (!cancelled) setActionItemsSnapshot([]); });
+    return () => { cancelled = true; };
+  }, [backendConnected, jiraCtx?.backendUrl, jiraCtx?.beToken, itemsVersion]);
 
   function handleLoad(result) {
     if (result.jiraToken) {
       setJiraCtx({ backendUrl: result.jiraBackendUrl, beToken: result.jiraToken, jiraCreds: result.jiraCreds || null });
     }
     setFileData(result);
-    setTab(TABS[0]);
+    setSection("Ticket Analytics");
+    setSubTab(ANALYTICS_TABS[0]);
     setLandingMode("choose");
+  }
+
+  function selectSection(name) {
+    setSection(name);
+    if (name === "Ticket Analytics") setSubTab(ANALYTICS_TABS[0]);
   }
 
   function openHistory(key) {
     setHistoryKey((prev) => (prev === key ? null : key));
   }
 
-  /* ── Landing screen ─────────────────────────────────────────────── */
+  /* ── Login gate ─────────────────────────────────────────────────────── */
+  if (!jiraCtx && !skippedLogin) {
+    return <Login onLoggedIn={setJiraCtx} onSkip={handleSkipLogin} />;
+  }
+
+  /* ── Upload / connect overlays ─────────────────────────────────────── */
+  if (landingMode === "excel") {
+    return (
+      <div style={{ position: "relative" }}>
+        <button className="btn-sm" style={{ position: "fixed", top: 16, left: 16, zIndex: 10 }}
+          onClick={() => setLandingMode("choose")}>← Back</button>
+        <ExcelImport onLoad={handleLoad} />
+      </div>
+    );
+  }
+  if (landingMode === "jira") {
+    return (
+      <div className="import-wrap" style={{ position: "relative" }}>
+        <button className="btn-sm" style={{ position: "fixed", top: 16, left: 16, zIndex: 10 }}
+          onClick={() => setLandingMode("choose")}>← Back</button>
+        <JiraConnect onLoad={handleLoad} />
+      </div>
+    );
+  }
+
+  /* ── Landing screen (only reached if there's somehow no data at all) ── */
   if (!fileData) {
-    if (landingMode === "excel") {
-      return (
-        <div style={{ position: "relative" }}>
-          <button className="btn-sm" style={{ position: "fixed", top: 16, left: 16, zIndex: 10 }}
-            onClick={() => setLandingMode("choose")}>← Back</button>
-          <ExcelImport onLoad={handleLoad} />
-        </div>
-      );
-    }
-    if (landingMode === "jira") {
-      return (
-        <div className="import-wrap" style={{ position: "relative" }}>
-          <button className="btn-sm" style={{ position: "fixed", top: 16, left: 16, zIndex: 10 }}
-            onClick={() => setLandingMode("choose")}>← Back</button>
-          <JiraConnect onLoad={handleLoad} />
-        </div>
-      );
-    }
     return (
       <div className="import-wrap">
         <div className="import-logo">🎫</div>
@@ -83,41 +209,126 @@ export default function App() {
     );
   }
 
-  const { rows, sheet, warnings, fileName } = fileData;
+  const { rows, warnings, isDemo } = fileData;
+  const overdueCount = countOverdue(actionItemsSnapshot);
 
   return (
-    <>
-      <div className="brand-bar">
-        <div className="brand-bar-title">
-          <span>◈</span> CloudFuze — Migration Ops Dashboard
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <img src="/logo.jpg" alt="CloudFuze" className="sidebar-logo-img" />
+          <span className="sidebar-brand-text-solo">MIGRATION OPS</span>
         </div>
-        <div className="brand-bar-right">
-          {num(rows.length)} tickets{jiraCtx ? " · 🔗 Jira live" : ""}
+        <nav className="sidebar-nav">
+          {NAV_GROUPS.map((group) => (
+            <div className="sidebar-group" key={group.label || "top"}>
+              {group.label && <div className="sidebar-group-label">{group.label}</div>}
+              {group.items.map((item) => (
+                <button
+                  key={item.name}
+                  className={"sidebar-link" + (section === item.name ? " active" : "")}
+                  onClick={() => selectSection(item.name)}
+                >
+                  <span className="sidebar-link-icon">{item.icon}</span>
+                  <span>{item.name}</span>
+                  {item.name === "Action Items" && overdueCount > 0 && (
+                    <span className="sidebar-badge">{overdueCount}</span>
+                  )}
+                  {item.name === "Notifications" && overdueCount > 0 && (
+                    <span className="sidebar-badge">{overdueCount}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+      </aside>
+
+      <div className="shell-main">
+        <header className="topbar">
+          <div className="topbar-breadcrumb">
+            <span>Home</span> <span className="tb-sep">›</span>{" "}
+            <span className={section === "Ticket Analytics" ? "" : "tb-current"}>{section}</span>
+            {section === "Ticket Analytics" && (
+              <> <span className="tb-sep">›</span> <span className="tb-current">{subTab}</span></>
+            )}
+          </div>
+          <div className="topbar-right">
+            <span className="topbar-stat">{num(rows.length)} tickets{jiraCtx ? " · 🔗 Jira live" : ""}</span>
+            {overdueCount > 0 && (
+              <span className="topbar-bell" title={`${overdueCount} overdue action item(s)`}>
+                🔔<span className="topbar-bell-dot">{overdueCount}</span>
+              </span>
+            )}
+            {!isDemo && (
+              <button className="btn-sm" onClick={() => { setFileData(generateDemoData()); setJiraCtx(null); setHistoryKey(null); }}>
+                ↩ Change file
+              </button>
+            )}
+            <span className="topbar-profile" title={backendConnected ? "Signed in to the backend" : "Not signed in — using local/sample data"}>
+              <span className="topbar-avatar">MO</span> {backendConnected ? "Signed in" : "Guest"}
+            </span>
+            {backendConnected && (
+              <button className="btn-sm" onClick={() => { clearSession(); setJiraCtx(null); setHistoryKey(null); sessionStorage.removeItem("skippedLogin"); setSkippedLogin(false); }}>
+                ⏻ Log out
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="shell-content">
+          {isDemo && section === "Ticket Analytics" && (
+            <div className="file-bar" style={{ background: "#fffbeb", borderColor: "var(--amber)" }}>
+              <span>🧪 <strong>Viewing sample data</strong> — upload your own ticket export or connect to Jira to see real numbers.</span>
+              <button className="btn-sm" onClick={() => setLandingMode("excel")}>📊 Upload Excel</button>
+              <button className="btn-sm" onClick={() => setLandingMode("jira")}>🔗 Connect to Jira</button>
+            </div>
+          )}
+
+          {warnings && warnings.length > 0 && section === "Ticket Analytics" && (
+            <div className="warn-row" style={{ marginBottom: 14 }}>
+              {warnings.map((w, i) => <span key={i} className="warn-chip">⚠️ {w}</span>)}
+            </div>
+          )}
+
+          {section === "Ticket Analytics" && (
+            <>
+              <div className="tabs" style={{ marginTop: 0 }}>
+                {ANALYTICS_TABS.map((t) => (
+                  <button key={t} className={"tab" + (subTab === t ? " active" : "")} onClick={() => setSubTab(t)}>
+                    {TAB_ICONS[t]} {t}
+                  </button>
+                ))}
+              </div>
+              {subTab === "Tickets Resolved" && <TicketsResolved rows={rows} jiraUrl={jiraCtx?.jiraCreds?.baseUrl || JIRA_BASE_URL} onHistory={jiraCtx ? openHistory : null} />}
+              {subTab === "Assignee with SLA" && <AssigneeSLA rows={rows} jiraUrl={jiraCtx?.jiraCreds?.baseUrl || JIRA_BASE_URL} onHistory={jiraCtx ? openHistory : null} />}
+              {subTab === "Ticket Ageing"       && <TicketAgeing rows={rows} jiraUrl={jiraCtx?.jiraCreds?.baseUrl || JIRA_BASE_URL} onHistory={jiraCtx ? openHistory : null} />}
+              {subTab === "Engineer Patterns"   && <EngineerPatterns rows={rows} />}
+            </>
+          )}
+
+          {section === "Action Items" && <ActionItems onChange={() => setItemsVersion((v) => v + 1)} jiraCtx={jiraCtx} />}
+          {section === "Notifications" && <NotificationsPage items={actionItemsSnapshot} />}
+          {section === "Migration Managers" && (
+            <>
+              <h2 className="ai-title" style={{ marginBottom: 2 }}>Migration Managers</h2>
+              <p className="ai-subtitle" style={{ marginBottom: 16 }}>Track and manage Enterprise (ENT) and SMB migration managers and their projects.</p>
+              <div className="mm-segment">
+                {MANAGER_SEGMENT_TABS.map((t) => (
+                  <button key={t} className={"mm-segment-btn" + (managerTab === t ? " active" : "")} onClick={() => setManagerTab(t)}>
+                    {t === "ENT" ? "🏢" : "🏬"} {t}
+                  </button>
+                ))}
+              </div>
+              <MigrationManagers segment={managerTab} />
+            </>
+          )}
+          {section === "Email Settings" && <EmailSettings jiraCtx={jiraCtx} />}
+          {!REAL_SECTIONS.has(section) && (
+            <ComingSoon title={section} icon={NAV_GROUPS.flatMap((g) => g.items).find((i) => i.name === section)?.icon} />
+          )}
         </div>
       </div>
-    <div className="app">
-      <div className="header">
-        <h1>🎫 Ticket Analytics</h1>
-        <p>{fileName}{sheet && sheet !== "Live" ? ` · ${sheet}` : ""}</p>
-      </div>
-
-      <ChangeFileBar
-        fileName={fileName || "workbook.xlsx"}
-        sheet={sheet}
-        warnings={warnings}
-        onReset={() => { setFileData(null); setJiraCtx(null); setHistoryKey(null); }}
-      />
-
-      <div className="tabs">
-        {TABS.map((t) => (
-          <button key={t} className={"tab" + (tab === t ? " active" : "")} onClick={() => setTab(t)}>{t}</button>
-        ))}
-      </div>
-
-      {tab === "Tickets Resolved" && <TicketsResolved rows={rows} jiraUrl={jiraCtx?.jiraCreds?.baseUrl || JIRA_BASE_URL} onHistory={jiraCtx ? openHistory : null} />}
-      {tab === "Assignee with SLA" && <AssigneeSLA rows={rows} jiraUrl={jiraCtx?.jiraCreds?.baseUrl || JIRA_BASE_URL} onHistory={jiraCtx ? openHistory : null} />}
-      {tab === "Ticket Ageing"       && <TicketAgeing rows={rows} jiraUrl={jiraCtx?.jiraCreds?.baseUrl || JIRA_BASE_URL} onHistory={jiraCtx ? openHistory : null} />}
-      {tab === "Engineer Patterns"   && <EngineerPatterns rows={rows} />}
 
       {/* Ticket history drawer — rendered at top level, works across all tabs */}
       {historyKey && jiraCtx && (
@@ -130,7 +341,6 @@ export default function App() {
         />
       )}
     </div>
-    </>
   );
 }
 

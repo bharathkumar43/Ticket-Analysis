@@ -51,6 +51,15 @@ export async function loginBackend(backendUrl, username, password) {
   return data.token;
 }
 
+export async function signupBackend(backendUrl, username, password, email) {
+  const data = await apiFetch(`${backendUrl}/api/auth/signup`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ username, password, email }),
+  });
+  return data.token;
+}
+
 export async function fetchJiraConfig(backendUrl, beToken) {
   return apiFetch(`${backendUrl}/api/jira/config`, {
     headers: { Authorization: `Bearer ${beToken}` },

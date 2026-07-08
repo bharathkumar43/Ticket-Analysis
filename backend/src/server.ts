@@ -3,12 +3,15 @@ import cron from 'node-cron'
 import app from './app'
 import { jiraService } from './services/jiraService'
 import { getJiraConfig } from './lib/jiraConfig'
+import { runActionItemReminders } from './services/actionItemReminderService'
+import { isMailConfigured } from './services/mailService'
 
 const PORT = process.env.PORT || 3001
 
 app.listen(PORT, () => {
   console.log(`MigrationOps API running on http://localhost:${PORT}`)
   scheduleSyncJob()
+  scheduleActionItemReminders()
 })
 
 function scheduleSyncJob() {
@@ -34,4 +37,28 @@ function scheduleSyncJob() {
   })
 
   console.log(`Jira sync scheduled: ${syncCron}`)
+}
+
+function scheduleActionItemReminders() {
+  if (!isMailConfigured()) {
+    console.log('Action item email reminders: SMTP not configured — cron will run but skip sending')
+  }
+
+  const reminderCron = process.env.ACTION_ITEM_REMINDER_CRON || '0 8 * * *' // daily at 8am
+  if (!cron.validate(reminderCron)) {
+    console.warn(`Invalid ACTION_ITEM_REMINDER_CRON expression: ${reminderCron}`)
+    return
+  }
+
+  cron.schedule(reminderCron, async () => {
+    console.log('Running action item reminder check...')
+    try {
+      const result = await runActionItemReminders()
+      console.log(`Action item reminders: checked ${result.checked}, sent ${result.sent}, skipped ${result.skipped}`)
+    } catch (err) {
+      console.error('Action item reminder run failed:', err)
+    }
+  })
+
+  console.log(`Action item reminders scheduled: ${reminderCron}`)
 }

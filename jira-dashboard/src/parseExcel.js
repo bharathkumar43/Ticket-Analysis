@@ -128,6 +128,39 @@ function calendarToBusinessDays(calDays) {
   return weeks * 5 + Math.min(remainder, 5);
 }
 
+// ── Header row detection ──────────────────────────────────────────────────────
+// Scans the first few rows of a sheet (not just row 0) so tables preceded by a
+// title/blank row, or workbooks with an unconventional layout, still parse.
+const HEADER_SCAN_ROWS = 10;
+
+function findBestHeaderRow(data) {
+  let best = { rowIdx: -1, headers: [], mapping: {}, score: -1 };
+  for (let i = 0; i < Math.min(HEADER_SCAN_ROWS, data.length); i++) {
+    const headers = (data[i] || []).map(String);
+    if (!headers.some((h) => h.trim())) continue;
+    const mapping = buildMapping(headers);
+    const score = Object.keys(mapping).length;
+    if (score > best.score) best = { rowIdx: i, headers, mapping, score };
+  }
+  return best;
+}
+
+function extractSheetRows(ws) {
+  const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  if (data.length < 2) return null;
+
+  const { rowIdx, headers, mapping, score } = findBestHeaderRow(data);
+  if (rowIdx === -1 || score < 2) return null;
+
+  const rawRows = data.slice(rowIdx + 1).map((r) => {
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = r[i] ?? ""; });
+    return obj;
+  });
+
+  return { headers, mapping, score, rawRows };
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 export function parseExcelFile(file) {
   return new Promise((resolve, reject) => {
@@ -138,37 +171,40 @@ export function parseExcelFile(file) {
       try {
         const wb = XLSX.read(e.target.result, { type: "array", cellDates: true });
 
-        // Pick the sheet with the most matched columns
-        let bestSheet = null, bestMapping = {}, bestScore = -1, bestHeaders = [];
-
+        // Scan every sheet; any sheet whose columns look like ticket data gets
+        // pulled in and merged (handles workbooks with multiple ticket tabs,
+        // e.g. "Active" + "Completed", instead of only using the single best sheet).
+        const matchedSheets = [];
         for (const sheetName of wb.SheetNames) {
-          const ws = wb.Sheets[sheetName];
-          const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-          if (data.length < 2) continue;
-
-          const headers = (data[0] || []).map(String);
-          const mapping = buildMapping(headers);
-          const score   = Object.keys(mapping).length;
-
-          if (score > bestScore) {
-            bestScore   = score;
-            bestSheet   = sheetName;
-            bestMapping = mapping;
-            bestHeaders = headers;
-          }
+          const extracted = extractSheetRows(wb.Sheets[sheetName]);
+          if (extracted) matchedSheets.push({ sheetName, ...extracted });
         }
 
-        if (!bestSheet || bestScore < 2) {
+        if (!matchedSheets.length) {
           reject(new Error(
-            "Could not identify ticket data columns. Expected columns like: Key, Summary, Assignee, Priority, Status. " +
+            "Could not identify ticket data columns in any sheet. Expected columns like: Key, Summary, Assignee, Priority, Status. " +
             "Sheets found: " + wb.SheetNames.join(", ")
           ));
           return;
         }
 
-        const ws      = wb.Sheets[bestSheet];
-        const rawRows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        // Union matched fields and their column-name variants across all sheets, so a row from
+        // any sheet resolves correctly even if sheets use slightly different header names.
+        const bestMapping = { __multi: {} };
+        for (const s of matchedSheets) {
+          for (const [field, cols] of Object.entries(s.mapping.__multi || {})) {
+            if (!bestMapping[field]) bestMapping[field] = s.mapping[field];
+            bestMapping.__multi[field] = [...new Set([...(bestMapping.__multi[field] || []), ...cols])];
+          }
+        }
+        const bestHeaders = matchedSheets.flatMap((s) => s.headers);
+        const bestSheet   = matchedSheets.map((s) => s.sheetName).join(" + ");
+        const rawRows     = matchedSheets.flatMap((s) => s.rawRows);
         const warnings = [];
+
+        if (matchedSheets.length > 1) {
+          warnings.push(`Merged ${matchedSheets.length} sheets: ${matchedSheets.map((s) => s.sheetName).join(", ")}.`);
+        }
 
         const getString = (row, field) => {
           // For fields with multiple columns (e.g. Jira's repeated "Custom field (Combination)"),
