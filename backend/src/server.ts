@@ -14,7 +14,7 @@ import app from './app'
 import { jiraService } from './services/jiraService'
 import { getJiraConfig } from './lib/jiraConfig'
 import { runActionItemReminders } from './services/actionItemReminderService'
-import { isMailConfigured } from './services/mailService'
+import { isMailConfigured, getMailSettings } from './services/mailService'
 
 const PORT = process.env.PORT || 3600
 
@@ -51,7 +51,9 @@ function scheduleSyncJob() {
 
 function scheduleActionItemReminders() {
   if (!isMailConfigured()) {
-    console.log('Action item email reminders: SMTP not configured — cron will run but skip sending')
+    console.log('Action item email reminders: Azure AD not configured — cron will run but skip sending')
+  } else {
+    console.log(`Action item reminders: will send via Microsoft Graph API (provider: ${getMailSettings().provider})`)
   }
 
   const reminderCron = process.env.ACTION_ITEM_REMINDER_CRON || '0 8 * * *' // daily at 8am

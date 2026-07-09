@@ -27,11 +27,12 @@ enum BreachFlag {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
-  passwordHash String
-  email        String?
-  createdAt    DateTime @default(now())
+  id             String   @id @default(cuid())
+  username       String   @unique
+  passwordHash   String
+  email          String?
+  msRefreshToken String?
+  createdAt      DateTime @default(now())
 }
 
 model Person {

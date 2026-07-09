@@ -217,9 +217,8 @@ export default function App() {
   });
   const [historyKey,  setHistoryKey]  = useState(null);
   const [landingMode, setLandingMode] = useState("choose"); // "choose" | "excel" | "jira"
-  const [itemsVersion, setItemsVersion] = useState(0); // bumped when Action Items change, to refresh overdue badge and Notifications
+  const [itemsVersion, setItemsVersion] = useState(0);
   const [actionItemsSnapshot, setActionItemsSnapshot] = useState([]);
-  const [skippedLogin, setSkippedLogin] = useState(() => sessionStorage.getItem("skippedLogin") === "1");
 
   const backendConnected = !!(jiraCtx?.backendUrl && jiraCtx?.beToken);
   const jwtPayload  = jiraCtx?.beToken ? parseJwt(jiraCtx.beToken) : null;
@@ -227,10 +226,6 @@ export default function App() {
   const displayName = currentUser.includes("@") ? currentUser.split("@")[0] : currentUser;
   const userInitials = displayName ? displayName.slice(0, 2).toUpperCase() : "MO";
 
-  function handleSkipLogin() {
-    sessionStorage.setItem("skippedLogin", "1");
-    setSkippedLogin(true);
-  }
   useEffect(() => {
     let cancelled = false;
     const store = backendConnected ? makeBackendActionItemsStore(jiraCtx.backendUrl, jiraCtx.beToken) : makeLocalActionItemsStore();
@@ -275,8 +270,8 @@ export default function App() {
   }
 
   /* ── Login gate ─────────────────────────────────────────────────────── */
-  if (!jiraCtx && !skippedLogin) {
-    return <Login onLoggedIn={setJiraCtx} onSkip={handleSkipLogin} />;
+  if (!jiraCtx) {
+    return <Login onLoggedIn={setJiraCtx} />;
   }
 
   /* ── Upload / connect overlays ─────────────────────────────────────── */
@@ -371,8 +366,8 @@ export default function App() {
               </span>
             )}
             {!isDemo && (
-              <button className="btn-sm" onClick={() => { setFileData(generateDemoData()); setJiraCtx(null); setHistoryKey(null); }}>
-                ↩ Change file
+              <button className="btn-sm" onClick={() => { setFileData(generateDemoData()); setHistoryKey(null); }}>
+                ↩ Reset data
               </button>
             )}
             <span className="topbar-profile" title={backendConnected ? `Signed in as ${currentUser}` : "Not signed in — using local/sample data"}>

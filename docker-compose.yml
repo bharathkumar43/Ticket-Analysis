@@ -68,12 +68,8 @@ services:
       JIRA_JQL:       ${JIRA_JQL:-project in (CFITS, PRI) ORDER BY updated DESC}
       SYNC_CRON:      ${SYNC_CRON:-0 */6 * * *}
 
-      # Email reminders for Action Items (optional — omit to disable)
-      SMTP_HOST:   ${SMTP_HOST:-}
-      SMTP_PORT:   ${SMTP_PORT:-587}
-      SMTP_USER:   ${SMTP_USER:-}
-      SMTP_PASS:   ${SMTP_PASS:-}
-      MAIL_FROM:   ${MAIL_FROM:-CloudFuze Migration Ops <no-reply@cloudfuze.com>}
+      # Action item reminder emails — sent via Microsoft Graph API using the
+      # logged-in user's account. No SMTP config needed.
       ACTION_ITEM_REMINDER_CRON: ${ACTION_ITEM_REMINDER_CRON:-0 8 * * *}
 
     depends_on:

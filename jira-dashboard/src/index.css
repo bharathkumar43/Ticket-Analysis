@@ -487,6 +487,10 @@ td.wrap { white-space: normal; max-width: 380px; }
 }
 .ms-btn:hover:not(:disabled) { border-color: var(--brand); box-shadow: 0 2px 8px rgba(23,43,140,.15); }
 .ms-btn:disabled { opacity: .45; cursor: not-allowed; }
+.ms-btn-large { padding: 14px 20px; font-size: 16px; border-radius: 10px; margin-top: 8px; }
+.login-card-ms { max-width: 420px; text-align: center; }
+.login-heading { font-size: 22px; font-weight: 800; color: var(--heading-blue); margin: 8px 0 4px; }
+.login-footer-note { font-size: 12px; color: var(--muted); margin-top: 20px; line-height: 1.6; }
 
 /* ── JiraConnect form ── */
 .jc-form {

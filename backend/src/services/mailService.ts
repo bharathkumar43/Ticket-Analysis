@@ -1,69 +1,94 @@
-import nodemailer from 'nodemailer'
+import axios from 'axios'
+import { prisma } from '../lib/prisma'
 
-let transporter: nodemailer.Transporter | null = null
-let initTried = false
-
-function getTransporter(): nodemailer.Transporter | null {
-  if (initTried) return transporter
-  initTried = true
-
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-    return null
-  }
-
-  transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT) || 587,
-    secure: Number(SMTP_PORT) === 465,
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-  })
-  return transporter
-}
-
+// Returns true if Azure AD is configured (required to send via Graph API)
 export function isMailConfigured(): boolean {
-  return getTransporter() !== null
+  return !!(process.env.AZURE_CLIENT_ID && process.env.AZURE_CLIENT_SECRET)
 }
 
 export function getMailSettings() {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, MAIL_FROM } = process.env
   return {
     configured: isMailConfigured(),
-    host: SMTP_HOST || null,
-    port: SMTP_HOST ? (Number(SMTP_PORT) || 587) : null,
-    user: SMTP_USER || null,
-    from: MAIL_FROM || SMTP_USER || null,
+    provider:   'microsoft-graph',
     cronSchedule: process.env.ACTION_ITEM_REMINDER_CRON || '0 8 * * *',
   }
 }
 
-// Verifies the SMTP connection/credentials actually work, without sending an email.
-export async function verifyMailConnection(): Promise<void> {
-  const t = getTransporter()
-  if (!t) {
-    throw new Error('Email is not configured on this server (missing SMTP_HOST/SMTP_USER/SMTP_PASS)')
+// Get a fresh access token for mail sending using the stored refresh token
+// of any user who has logged in with Microsoft.
+async function getGraphAccessToken(): Promise<{ token: string; senderEmail: string }> {
+  const user = await prisma.user.findFirst({
+    where: { msRefreshToken: { not: null } },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  if (!user?.msRefreshToken) {
+    throw new Error('No Microsoft session found — a user must log in with Microsoft at least once before reminders can be sent.')
   }
-  await t.verify()
+
+  const tenantId = process.env.AZURE_TENANT_ID || 'common'
+
+  const resp = await axios.post<{ access_token: string; refresh_token?: string }>(
+    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    new URLSearchParams({
+      client_id:     process.env.AZURE_CLIENT_ID     || '',
+      client_secret: process.env.AZURE_CLIENT_SECRET || '',
+      refresh_token: user.msRefreshToken,
+      grant_type:    'refresh_token',
+      scope:         'Mail.Send',
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  )
+
+  // Microsoft rotates refresh tokens — always store the latest one
+  if (resp.data.refresh_token) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data:  { msRefreshToken: resp.data.refresh_token },
+    })
+  }
+
+  return { token: resp.data.access_token, senderEmail: user.email || user.username }
+}
+
+// Verifies we can get an access token (used by the test endpoint)
+export async function verifyMailConnection(): Promise<string> {
+  if (!isMailConfigured()) {
+    throw new Error('Azure AD is not configured (missing AZURE_CLIENT_ID or AZURE_CLIENT_SECRET).')
+  }
+  const { senderEmail } = await getGraphAccessToken()
+  return senderEmail
 }
 
 export async function sendMail(to: string, subject: string, html: string): Promise<void> {
-  const t = getTransporter()
-  if (!t) {
-    throw new Error('Email is not configured on this server (missing SMTP_HOST/SMTP_USER/SMTP_PASS)')
-  }
-  const from = process.env.MAIL_FROM || process.env.SMTP_USER
-  await t.sendMail({ from, to, subject, html })
+  const { token } = await getGraphAccessToken()
+
+  await axios.post(
+    'https://graph.microsoft.com/v1.0/me/sendMail',
+    {
+      message: {
+        subject,
+        body:         { contentType: 'HTML', content: html },
+        toRecipients: [{ emailAddress: { address: to } }],
+      },
+      saveToSentItems: false,
+    },
+    { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
+  )
 }
 
-export function actionItemReminderEmail(item: {
-  title: string; priority: string; dueDate: Date | null; meetingType: string
-}, kind: 'due_soon' | 'overdue'): { subject: string; html: string } {
+export function actionItemReminderEmail(
+  item: { title: string; priority: string; dueDate: Date | null; meetingType: string },
+  kind: 'due_soon' | 'overdue'
+): { subject: string; html: string } {
   const due = item.dueDate ? item.dueDate.toISOString().slice(0, 10) : 'no due date'
   const subject = kind === 'overdue'
     ? `[Overdue] Action item: ${item.title}`
     : `[Reminder] Action item due tomorrow: ${item.title}`
   const html = `
-    <p>${kind === 'overdue' ? 'This action item is now <strong>overdue</strong>.' : 'This action item is <strong>due tomorrow</strong>.'}</p>
+    <p>${kind === 'overdue'
+      ? 'This action item is now <strong>overdue</strong>.'
+      : 'This action item is <strong>due tomorrow</strong>.'}</p>
     <ul>
       <li><strong>Title:</strong> ${item.title}</li>
       <li><strong>Meeting:</strong> ${item.meetingType}</li>
