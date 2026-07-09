@@ -1,7 +1,10 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Install ALL deps (TypeScript, ts-node needed for build)
+# openssl is required by Prisma's schema/query engine binaries during generate
+RUN apk add --no-cache openssl
+
+# Install ALL deps (TypeScript needed for build)
 COPY package*.json ./
 RUN npm ci
 
@@ -12,6 +15,9 @@ RUN npx prisma generate && npm run build
 # ── Runtime stage ────────────────────────────────────────────────────────────
 FROM node:20-alpine
 WORKDIR /app
+
+# openssl is required by Prisma's migration engine and query engine at runtime
+RUN apk add --no-cache openssl
 
 # Install production deps only
 COPY package*.json ./
