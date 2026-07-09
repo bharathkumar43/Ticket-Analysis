@@ -48,7 +48,7 @@ services:
       DATABASE_URL: "postgresql://${DB_USER:-migrationops}:${DB_PASSWORD:-migrationops}@postgres:5432/${DB_NAME:-migrationops}?schema=public"
 
       # Auth
-      JWT_SECRET:  ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_SECRET:  ${JWT_SECRET:-change-me-to-a-random-secret-in-production}
 
       # Microsoft Azure AD login (optional — leave blank to disable)
       AZURE_CLIENT_ID:     ${AZURE_CLIENT_ID:-}
