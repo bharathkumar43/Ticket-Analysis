@@ -1,4 +1,14 @@
 import 'dotenv/config'
+
+process.on('unhandledRejection', (reason) => {
+  console.error('💥 Unhandled Rejection:', reason)
+  process.exit(1)
+})
+process.on('uncaughtException', (err) => {
+  console.error('💥 Uncaught Exception:', err)
+  process.exit(1)
+})
+
 import cron from 'node-cron'
 import app from './app'
 import { jiraService } from './services/jiraService'
@@ -6,7 +16,7 @@ import { getJiraConfig } from './lib/jiraConfig'
 import { runActionItemReminders } from './services/actionItemReminderService'
 import { isMailConfigured } from './services/mailService'
 
-const PORT = process.env.PORT || 3001
+const PORT = process.env.PORT || 3600
 
 app.listen(PORT, () => {
   console.log(`MigrationOps API running on http://localhost:${PORT}`)

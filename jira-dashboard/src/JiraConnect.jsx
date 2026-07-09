@@ -3,7 +3,7 @@ import {
   loginBackend, fetchJiraConfig, fetchLiveIssues, saveSession,
 } from "./jiraApi.js";
 
-const DEFAULT_BACKEND  = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+const DEFAULT_BACKEND  = import.meta.env.VITE_BACKEND_URL || "http://localhost:3600";
 const DEFAULT_JIRA_URL = "https://cf2020.atlassian.net";
 const DEFAULT_JQL      = "project in (CFITS, PRI) ORDER BY updated DESC";
 

@@ -1,16 +1,102 @@
 version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# How to deploy:
+#   1. Copy .env.example → .env and fill in your values
+#   2. docker compose up -d --build
+#
+# After startup:
+#   Frontend  → http://localhost        (nginx, port 80)
+#   API       → http://localhost/api    (proxied through nginx to backend)
+#   Backend   → http://localhost:3600   (direct, for debugging)
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: migrationops
-      POSTGRES_PASSWORD: migrationops
-      POSTGRES_DB: migrationops
-    ports:
-      - "5433:5432"
+      POSTGRES_USER:     ${DB_USER:-migrationops}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-migrationops}
+      POSTGRES_DB:       ${DB_NAME:-migrationops}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U ${DB_USER:-migrationops}"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  # ── Backend (Express + Prisma) ───────────────────────────────────────────────
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "3600:3600"   # Exposed for direct API access / debugging
+    environment:
+      NODE_ENV:    production
+      PORT:        3600
+
+      # Database — both styles supported; DATABASE_URL is used by Prisma CLI
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_USER:     ${DB_USER:-migrationops}
+      DB_PASSWORD: ${DB_PASSWORD:-migrationops}
+      DB_NAME:     ${DB_NAME:-migrationops}
+      DATABASE_URL: "postgresql://${DB_USER:-migrationops}:${DB_PASSWORD:-migrationops}@postgres:5432/${DB_NAME:-migrationops}?schema=public"
+
+      # Auth
+      JWT_SECRET:  ${JWT_SECRET:?JWT_SECRET is required}
+
+      # Microsoft Azure AD login (optional — leave blank to disable)
+      AZURE_CLIENT_ID:     ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      AZURE_TENANT_ID:     ${AZURE_TENANT_ID:-}
+
+      # Public URLs — used for Microsoft OAuth redirect and CORS
+      # Set to the domain/IP where users access the app (no trailing slash)
+      BACKEND_URL:  ${PUBLIC_URL:-http://localhost}
+      FRONTEND_URL: ${PUBLIC_URL:-http://localhost}
+      CORS_ORIGIN:  ${PUBLIC_URL:-http://localhost}
+
+      # Jira live sync (optional)
+      JIRA_BASE_URL:  ${JIRA_BASE_URL:-}
+      JIRA_EMAIL:     ${JIRA_EMAIL:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      JIRA_JQL:       ${JIRA_JQL:-project in (CFITS, PRI) ORDER BY updated DESC}
+      SYNC_CRON:      ${SYNC_CRON:-0 */6 * * *}
+
+      # Email reminders for Action Items (optional — omit to disable)
+      SMTP_HOST:   ${SMTP_HOST:-}
+      SMTP_PORT:   ${SMTP_PORT:-587}
+      SMTP_USER:   ${SMTP_USER:-}
+      SMTP_PASS:   ${SMTP_PASS:-}
+      MAIL_FROM:   ${MAIL_FROM:-CloudFuze Migration Ops <no-reply@cloudfuze.com>}
+      ACTION_ITEM_REMINDER_CRON: ${ACTION_ITEM_REMINDER_CRON:-0 8 * * *}
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Frontend (Vite → nginx) ──────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./jira-dashboard
+      args:
+        # The base URL users type in the browser (no trailing slash).
+        # nginx proxies /api → backend, so this is the same as your site URL.
+        # Example production: VITE_BACKEND_URL=https://migrationops.cloudfuze.com
+        VITE_BACKEND_URL:      ${PUBLIC_URL:-http://localhost}
+        VITE_JIRA_BASE_URL:    ${JIRA_BASE_URL:-https://cf2020.atlassian.net}
+        VITE_AZURE_CLIENT_ID:  ${AZURE_CLIENT_ID:-}
+        VITE_AZURE_TENANT_ID:  ${AZURE_TENANT_ID:-}
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      - backend
 
 volumes:
   pgdata:

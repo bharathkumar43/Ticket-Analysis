@@ -51,6 +51,15 @@ export async function loginBackend(backendUrl, username, password) {
   return data.token;
 }
 
+export async function loginMicrosoft(backendUrl, accessToken) {
+  const data = await apiFetch(`${backendUrl}/api/auth/microsoft`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ accessToken }),
+  });
+  return data.token;
+}
+
 export async function signupBackend(backendUrl, username, password, email) {
   const data = await apiFetch(`${backendUrl}/api/auth/signup`, {
     method:  "POST",
@@ -89,4 +98,44 @@ export async function fetchIssueChangelog(backendUrl, beToken, key, jiraCreds) {
     `${backendUrl}/api/jira/issue/${encodeURIComponent(key)}/changelog`,
     { headers: jiraHeaders(beToken, jiraCreds) }
   );
+}
+
+// ── Monthly Data Storage ─────────────────────────────────────────────────────
+
+function authHeader(beToken) {
+  return { Authorization: `Bearer ${beToken}`, 'Content-Type': 'application/json' };
+}
+
+export async function listMonthlyUploads(backendUrl, beToken, type) {
+  const q = type ? `?type=${encodeURIComponent(type)}` : '';
+  return apiFetch(`${backendUrl}/api/monthly-uploads${q}`, {
+    headers: { Authorization: `Bearer ${beToken}` },
+  });
+}
+
+export async function saveMonthlyUpload(backendUrl, beToken, { month, year, uploadType, fileName, rows, uploadedBy }) {
+  return apiFetch(`${backendUrl}/api/monthly-uploads`, {
+    method: 'POST',
+    headers: authHeader(beToken),
+    body: JSON.stringify({ month, year, uploadType, fileName, rows, uploadedBy }),
+  });
+}
+
+export async function getMonthlyUploadRows(backendUrl, beToken, id) {
+  return apiFetch(`${backendUrl}/api/monthly-uploads/${id}/rows`, {
+    headers: { Authorization: `Bearer ${beToken}` },
+  });
+}
+
+export async function compareMonthlyUploads(backendUrl, beToken, ids) {
+  return apiFetch(`${backendUrl}/api/monthly-uploads/compare?ids=${ids.join(',')}`, {
+    headers: { Authorization: `Bearer ${beToken}` },
+  });
+}
+
+export async function deleteMonthlyUpload(backendUrl, beToken, id) {
+  return apiFetch(`${backendUrl}/api/monthly-uploads/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${beToken}` },
+  });
 }

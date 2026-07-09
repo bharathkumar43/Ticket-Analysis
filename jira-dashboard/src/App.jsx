@@ -7,6 +7,7 @@ import { TicketHistory } from "./TicketHistory.jsx";
 import { ActionItems } from "./ActionItems.jsx";
 import { MigrationManagers } from "./MigrationManagers.jsx";
 import { EmailSettings } from "./EmailSettings.jsx";
+import { MonthlyDataStore } from "./MonthlyDataStore.jsx";
 import { generateDemoData } from "./demoData.js";
 import { makeLocalActionItemsStore } from "./actionItemsStore.js";
 import { makeBackendActionItemsStore } from "./actionItemsApi.js";
@@ -25,29 +26,16 @@ const ANALYTICS_TABS = ["Tickets Resolved", "Assignee with SLA", "Ticket Ageing"
 const MANAGER_SEGMENT_TABS = ["ENT", "SMB"];
 
 // Sections that are real, working pages in this app.
-const REAL_SECTIONS = new Set(["Ticket Analytics", "Action Items", "Notifications", "Migration Managers", "Email Settings"]);
+const REAL_SECTIONS = new Set(["MBR Analytics", "Action Items", "Migration Managers", "History"]);
 
-// Sidebar layout matching the reference design. Sections not in REAL_SECTIONS
-// render a "Coming soon" placeholder instead of a dead/no-op click.
 const NAV_GROUPS = [
-  { label: "", items: [{ name: "Dashboard", icon: "🏠" }] },
   { label: "Analytics", items: [
-    { name: "MBR Analytics",      icon: "📊" },
-    { name: "SLA & Tickets",      icon: "⏱️" },
-    { name: "Ticket Analytics",   icon: "🎫" },
+    { name: "MBR Analytics",      icon: "🎫" },
     { name: "Migration Managers", icon: "🧭" },
-    { name: "Reports",            icon: "🗂️" },
   ]},
   { label: "Actions", items: [
     { name: "Action Items", icon: "📋" },
-    { name: "Calendar",     icon: "📅" },
-    { name: "Notifications", icon: "🔔" },
-  ]},
-  { label: "Settings", items: [
-    { name: "Email Settings", icon: "✉️" },
-    { name: "Categories",     icon: "🏷️" },
-    { name: "Users & Roles",  icon: "👥" },
-    { name: "Integrations",   icon: "🔌" },
+    { name: "History",      icon: "🗂️" },
   ]},
 ];
 
@@ -63,6 +51,107 @@ const JIRA_BASE_URL = (import.meta.env.VITE_JIRA_BASE_URL || "").replace(/\/$/, 
 function countOverdue(items) {
   const today = new Date().toISOString().slice(0, 10);
   return items.filter((it) => it.status !== "Resolved" && it.dueDate && it.dueDate < today).length;
+}
+
+function ManagersRawTable({ rows, columns }) {
+  const [search, setSearch] = useState("");
+  const filtered = search
+    ? rows.filter((r) => columns.some((c) => String(r[c] ?? "").toLowerCase().includes(search.toLowerCase())))
+    : rows;
+  return (
+    <div className="card full">
+      <div style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "center" }}>
+        <input className="jc-input" style={{ maxWidth: 280 }} placeholder="Search uploaded data…"
+          value={search} onChange={(e) => setSearch(e.target.value)} />
+        <span className="topbar-stat">{filtered.length} of {rows.length} rows</span>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead><tr>{columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+          <tbody>
+            {filtered.map((row, i) => (
+              <tr key={i}>{columns.map((c) => <td key={c}>{String(row[c] ?? "")}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function HistoryPage({ items }) {
+  const [tab, setTab] = useState("MBR");
+  const resolved = items.filter((it) => it.status === "Resolved");
+  const mbrCount  = resolved.filter((it) => it.meetingType === "MBR").length;
+  const ldCount   = resolved.filter((it) => it.meetingType === "Leadership").length;
+  const filtered  = resolved.filter((it) => it.meetingType === tab);
+
+  function priorityBadge(p) {
+    if (p === "High") return "b-red";
+    if (p === "Low")  return "b-green";
+    return "b-amber";
+  }
+
+  return (
+    <>
+      <div className="ai-header-row" style={{ marginBottom: 20 }}>
+        <div>
+          <h2 className="ai-title">History</h2>
+          <p className="ai-subtitle">{resolved.length} resolved action item{resolved.length !== 1 ? "s" : ""} across all meetings</p>
+        </div>
+      </div>
+
+      <div className="mm-segment" style={{ marginBottom: 24 }}>
+        <button className={"mm-segment-btn" + (tab === "MBR" ? " active" : "")} onClick={() => setTab("MBR")}>
+          📋 MBR {mbrCount > 0 && <span className="mm-count-badge">{mbrCount}</span>}
+        </button>
+        <button className={"mm-segment-btn" + (tab === "Leadership" ? " active" : "")} onClick={() => setTab("Leadership")}>
+          👥 Leadership {ldCount > 0 && <span className="mm-count-badge">{ldCount}</span>}
+        </button>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="empty-state" style={{ marginTop: 24 }}>
+          <div className="es-icon">📋</div>
+          <h3>No resolved {tab} items yet</h3>
+          <p>Action items from {tab} meetings marked as Resolved will appear here.</p>
+        </div>
+      ) : (
+        <div className="card full">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Title</th>
+                  <th>Owner</th>
+                  <th>Priority</th>
+                  <th>Due Date</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((it) => (
+                  <tr key={it.id}>
+                    <td><span className="ai-id">{"AI-" + it.seq}</span></td>
+                    <td className="wrap">{it.title}</td>
+                    <td>{it.owner || "—"}</td>
+                    <td><span className={"badge " + priorityBadge(it.priority)}>{it.priority}</span></td>
+                    <td>{it.dueDate || "—"}</td>
+                    <td className="wrap" style={{ color: "var(--muted)", fontSize: 13 }}>{it.notes || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function parseJwt(token) {
+  try { return JSON.parse(atob(token.split(".")[1])); } catch { return null; }
 }
 
 function ComingSoon({ title, icon }) {
@@ -115,7 +204,10 @@ function NotificationsPage({ items }) {
 
 export default function App() {
   const [fileData,    setFileData]    = useState(() => generateDemoData());
-  const [section,     setSection]     = useState("Ticket Analytics");
+  const [section,     setSection]     = useState("MBR Analytics");
+  const [managersFileData, setManagersFileData] = useState(null); // { rows, columns, fileName }
+  const [showMbrArchive,   setShowMbrArchive]   = useState(false);
+  const [showMgrArchive,   setShowMgrArchive]   = useState(false);
   const [subTab,      setSubTab]      = useState(ANALYTICS_TABS[0]);
   const [managerTab,  setManagerTab]  = useState(MANAGER_SEGMENT_TABS[0]);
   const [jiraCtx,     setJiraCtx]     = useState(() => {                // { backendUrl, beToken, jiraCreds } | null
@@ -130,6 +222,10 @@ export default function App() {
   const [skippedLogin, setSkippedLogin] = useState(() => sessionStorage.getItem("skippedLogin") === "1");
 
   const backendConnected = !!(jiraCtx?.backendUrl && jiraCtx?.beToken);
+  const jwtPayload  = jiraCtx?.beToken ? parseJwt(jiraCtx.beToken) : null;
+  const currentUser = jwtPayload?.userId || "";
+  const displayName = currentUser.includes("@") ? currentUser.split("@")[0] : currentUser;
+  const userInitials = displayName ? displayName.slice(0, 2).toUpperCase() : "MO";
 
   function handleSkipLogin() {
     sessionStorage.setItem("skippedLogin", "1");
@@ -147,14 +243,31 @@ export default function App() {
       setJiraCtx({ backendUrl: result.jiraBackendUrl, beToken: result.jiraToken, jiraCreds: result.jiraCreds || null });
     }
     setFileData(result);
-    setSection("Ticket Analytics");
+    setSection("MBR Analytics");
     setSubTab(ANALYTICS_TABS[0]);
     setLandingMode("choose");
   }
 
+  async function handleManagersFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    try {
+      const data = await file.arrayBuffer();
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(data, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+      setManagersFileData({ rows, columns, fileName: file.name });
+    } catch (err) {
+      console.error("Failed to read managers excel:", err);
+    }
+  }
+
   function selectSection(name) {
     setSection(name);
-    if (name === "Ticket Analytics") setSubTab(ANALYTICS_TABS[0]);
+    if (name === "MBR Analytics") setSubTab(ANALYTICS_TABS[0]);
   }
 
   function openHistory(key) {
@@ -234,9 +347,6 @@ export default function App() {
                   {item.name === "Action Items" && overdueCount > 0 && (
                     <span className="sidebar-badge">{overdueCount}</span>
                   )}
-                  {item.name === "Notifications" && overdueCount > 0 && (
-                    <span className="sidebar-badge">{overdueCount}</span>
-                  )}
                 </button>
               ))}
             </div>
@@ -248,8 +358,8 @@ export default function App() {
         <header className="topbar">
           <div className="topbar-breadcrumb">
             <span>Home</span> <span className="tb-sep">›</span>{" "}
-            <span className={section === "Ticket Analytics" ? "" : "tb-current"}>{section}</span>
-            {section === "Ticket Analytics" && (
+            <span className={section === "MBR Analytics" ? "" : "tb-current"}>{section}</span>
+            {section === "MBR Analytics" && (
               <> <span className="tb-sep">›</span> <span className="tb-current">{subTab}</span></>
             )}
           </div>
@@ -265,8 +375,9 @@ export default function App() {
                 ↩ Change file
               </button>
             )}
-            <span className="topbar-profile" title={backendConnected ? "Signed in to the backend" : "Not signed in — using local/sample data"}>
-              <span className="topbar-avatar">MO</span> {backendConnected ? "Signed in" : "Guest"}
+            <span className="topbar-profile" title={backendConnected ? `Signed in as ${currentUser}` : "Not signed in — using local/sample data"}>
+              <span className="topbar-avatar">{userInitials}</span>
+              {backendConnected ? (displayName || "Signed in") : "Guest"}
             </span>
             {backendConnected && (
               <button className="btn-sm" onClick={() => { clearSession(); setJiraCtx(null); setHistoryKey(null); sessionStorage.removeItem("skippedLogin"); setSkippedLogin(false); }}>
@@ -277,21 +388,40 @@ export default function App() {
         </header>
 
         <div className="shell-content">
-          {isDemo && section === "Ticket Analytics" && (
-            <div className="file-bar" style={{ background: "#fffbeb", borderColor: "var(--amber)" }}>
-              <span>🧪 <strong>Viewing sample data</strong> — upload your own ticket export or connect to Jira to see real numbers.</span>
-              <button className="btn-sm" onClick={() => setLandingMode("excel")}>📊 Upload Excel</button>
-              <button className="btn-sm" onClick={() => setLandingMode("jira")}>🔗 Connect to Jira</button>
+          {section === "MBR Analytics" && (
+            <div className="file-bar" style={{ background: isDemo ? "#fffbeb" : "var(--panel2)", borderColor: isDemo ? "var(--amber)" : "var(--border)" }}>
+              {isDemo
+                ? <span>🧪 <strong>Viewing sample data</strong> — upload your own ticket export or connect to Jira to see real numbers.</span>
+                : <span>📊 <strong>{fileData?.fileName || "Uploaded data"}</strong> — {num(rows.length)} tickets loaded</span>
+              }
+              {isDemo && <button className="btn-sm" onClick={() => setLandingMode("excel")}>📊 Upload Excel</button>}
+              {isDemo && <button className="btn-sm" onClick={() => setLandingMode("jira")}>🔗 Connect to Jira</button>}
+              <button className="btn-sm" style={{ marginLeft: "auto" }} onClick={() => setShowMbrArchive((v) => !v)}>
+                📁 {showMbrArchive ? "Hide Archive" : "Monthly Archive"}
+              </button>
             </div>
           )}
 
-          {warnings && warnings.length > 0 && section === "Ticket Analytics" && (
+          {warnings && warnings.length > 0 && section === "MBR Analytics" && (
             <div className="warn-row" style={{ marginBottom: 14 }}>
               {warnings.map((w, i) => <span key={i} className="warn-chip">⚠️ {w}</span>)}
             </div>
           )}
 
-          {section === "Ticket Analytics" && (
+          {section === "MBR Analytics" && showMbrArchive && (
+            <MonthlyDataStore
+              jiraCtx={jiraCtx}
+              uploadType="MBR"
+              currentRows={rows}
+              currentFileName={fileData?.fileName}
+              onLoadRows={(dbRows, fileName) => {
+                setFileData({ rows: dbRows, fileName, warnings: [], isDemo: false });
+                setShowMbrArchive(false);
+              }}
+            />
+          )}
+
+          {section === "MBR Analytics" && (
             <>
               <div className="tabs" style={{ marginTop: 0 }}>
                 {ANALYTICS_TABS.map((t) => (
@@ -308,22 +438,67 @@ export default function App() {
           )}
 
           {section === "Action Items" && <ActionItems onChange={() => setItemsVersion((v) => v + 1)} jiraCtx={jiraCtx} />}
-          {section === "Notifications" && <NotificationsPage items={actionItemsSnapshot} />}
           {section === "Migration Managers" && (
             <>
-              <h2 className="ai-title" style={{ marginBottom: 2 }}>Migration Managers</h2>
-              <p className="ai-subtitle" style={{ marginBottom: 16 }}>Track and manage Enterprise (ENT) and SMB migration managers and their projects.</p>
-              <div className="mm-segment">
-                {MANAGER_SEGMENT_TABS.map((t) => (
-                  <button key={t} className={"mm-segment-btn" + (managerTab === t ? " active" : "")} onClick={() => setManagerTab(t)}>
-                    {t === "ENT" ? "🏢" : "🏬"} {t}
+              <div className="ai-header-row">
+                <div>
+                  <h2 className="ai-title" style={{ marginBottom: 2 }}>Migration Managers</h2>
+                  <p className="ai-subtitle">
+                    {managersFileData
+                      ? <><strong>{managersFileData.fileName}</strong> — {managersFileData.rows.length} rows</>
+                      : "Track and manage Enterprise (ENT) and SMB migration managers and their projects."}
+                  </p>
+                </div>
+                <div className="ai-header-actions">
+                  {managersFileData && (
+                    <button className="btn-sm" onClick={() => setManagersFileData(null)}>✕ Clear upload</button>
+                  )}
+                  <label className="jc-btn" style={{ cursor: "pointer", fontSize: 13, padding: "7px 16px", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    📊 Upload Excel
+                    <input type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }}
+                      onChange={handleManagersFileChange} />
+                  </label>
+                  <button className="btn-sm" onClick={() => setShowMgrArchive((v) => !v)}>
+                    📁 {showMgrArchive ? "Hide Archive" : "Archive"}
                   </button>
-                ))}
+                </div>
               </div>
-              <MigrationManagers segment={managerTab} />
+
+              {showMgrArchive && (
+                <MonthlyDataStore
+                  jiraCtx={jiraCtx}
+                  uploadType="MIGRATION"
+                  currentRows={managersFileData?.rows}
+                  currentFileName={managersFileData?.fileName}
+                  onLoadRows={(dbRows, fileName) => {
+                    setManagersFileData({
+                      rows: dbRows,
+                      columns: dbRows.length > 0 ? Object.keys(dbRows[0]) : [],
+                      fileName,
+                    });
+                    setShowMgrArchive(false);
+                  }}
+                />
+              )}
+
+              {managersFileData ? (
+                <ManagersRawTable rows={managersFileData.rows} columns={managersFileData.columns} />
+              ) : (
+                <>
+                  <p className="mm-sample-tag">📋 Showing sample data — upload your own Excel to see real numbers.</p>
+                  <div className="mm-segment">
+                    {MANAGER_SEGMENT_TABS.map((t) => (
+                      <button key={t} className={"mm-segment-btn" + (managerTab === t ? " active" : "")} onClick={() => setManagerTab(t)}>
+                        {t === "ENT" ? "🏢" : "🏬"} {t}
+                      </button>
+                    ))}
+                  </div>
+                  <MigrationManagers segment={managerTab} />
+                </>
+              )}
             </>
           )}
-          {section === "Email Settings" && <EmailSettings jiraCtx={jiraCtx} />}
+          {section === "History" && <HistoryPage items={actionItemsSnapshot} />}
           {!REAL_SECTIONS.has(section) && (
             <ComingSoon title={section} icon={NAV_GROUPS.flatMap((g) => g.items).find((i) => i.name === section)?.icon} />
           )}

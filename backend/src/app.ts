@@ -14,11 +14,12 @@ import aliasRoutes from './routes/aliases'
 import exportRoutes from './routes/export'
 import actionItemRoutes from './routes/actionItems'
 import emailSettingsRoutes from './routes/emailSettings'
+import monthlyUploadRoutes from './routes/monthlyUploads'
 import { authMiddleware } from './middleware/auth'
 
 const app = express()
 
-const _allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174')
+const _allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174,http://localhost:6100,http://localhost:3600')
   .split(',').map(s => s.trim()).filter(Boolean)
 app.use(cors({
   origin: (origin, cb) => {
@@ -27,7 +28,7 @@ app.use(cors({
   },
   credentials: true,
 }))
-app.use(express.json())
+app.use(express.json({ limit: '20mb' }))
 
 // Public routes
 app.use('/api/auth', authRoutes)
@@ -43,6 +44,7 @@ app.use('/api/aliases', authMiddleware, aliasRoutes)
 app.use('/api/export', authMiddleware, exportRoutes)
 app.use('/api/action-items', authMiddleware, actionItemRoutes)
 app.use('/api/email-settings', authMiddleware, emailSettingsRoutes)
+app.use('/api/monthly-uploads', authMiddleware, monthlyUploadRoutes)
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok' }))

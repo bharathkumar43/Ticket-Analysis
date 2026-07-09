@@ -180,6 +180,41 @@ model JiraSyncRun {
   error      String?
 }
 
+model MonthlyUpload {
+  id         String       @id @default(cuid())
+  month      Int
+  year       Int
+  uploadType String
+  fileName   String
+  rowCount   Int          @default(0)
+  uploadedBy String?
+  uploadedAt DateTime     @default(now())
+  rows       MonthlyRow[]
+
+  @@unique([month, year, uploadType])
+  @@index([year, month])
+  @@index([uploadType])
+}
+
+model MonthlyRow {
+  id         String        @id @default(cuid())
+  upload     MonthlyUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  uploadId   String
+  data       Json
+  jiraKey    String?
+  summary    String?
+  assignee   String?
+  status     String?
+  priority   String?
+  resolution String?
+  created    DateTime?
+  updated    DateTime?
+
+  @@index([uploadId])
+  @@index([status])
+  @@index([assignee])
+}
+
 model ActionItem {
   id                 String    @id @default(cuid())
   seq                Int       @default(autoincrement())
