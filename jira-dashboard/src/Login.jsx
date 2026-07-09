@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { saveSession } from "./jiraApi.js";
 
-const DEFAULT_BACKEND = import.meta.env.VITE_BACKEND_URL || "http://localhost:3600";
+const DEFAULT_BACKEND = import.meta.env.VITE_BACKEND_URL || window.location.origin;
 
 export function Login({ onLoggedIn }) {
   const [error,  setError]  = useState(null);
