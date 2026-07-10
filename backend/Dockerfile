@@ -39,4 +39,4 @@ COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 EXPOSE 3600
 
 # Run migrations then start the server
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/src/server.js"]
+CMD ["sh", "-c", "node_modules/.bin/prisma db push --skip-generate && node dist/src/server.js"]
