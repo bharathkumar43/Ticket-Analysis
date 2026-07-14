@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { BarChartCard, PieChartCard } from "./components/Charts.jsx";
 import { ExcelImport } from "./ExcelImport.jsx";
-import { JiraConnect } from "./JiraConnect.jsx";
+import { NeutaraConnect } from "./NeutaraConnect.jsx";
 import { Login } from "./Login.jsx";
 import { TicketHistory } from "./TicketHistory.jsx";
 import { ActionItems } from "./ActionItems.jsx";
@@ -218,7 +218,7 @@ export default function App() {
     return { backendUrl: s.backendUrl, beToken: s.beToken, jiraCreds: { email: s.jiraEmail, apiToken: s.jiraApiToken, baseUrl: s.jiraBaseUrl } };
   });
   const [historyKey,  setHistoryKey]  = useState(null);
-  const [landingMode, setLandingMode] = useState("choose"); // "choose" | "excel" | "jira"
+  const [landingMode, setLandingMode] = useState("choose"); // "choose" | "excel" | "neutara"
   const [itemsVersion, setItemsVersion] = useState(0);
   const [actionItemsSnapshot, setActionItemsSnapshot] = useState([]);
 
@@ -286,12 +286,12 @@ export default function App() {
       </div>
     );
   }
-  if (landingMode === "jira") {
+  if (landingMode === "neutara") {
     return (
       <div className="import-wrap" style={{ position: "relative" }}>
         <button className="btn-sm" style={{ position: "fixed", top: 16, left: 16, zIndex: 10 }}
           onClick={() => setLandingMode("choose")}>← Back</button>
-        <JiraConnect onLoad={handleLoad} />
+        <NeutaraConnect onLoad={handleLoad} />
       </div>
     );
   }
@@ -304,15 +304,15 @@ export default function App() {
         <h2>Ticket Analytics Dashboard</h2>
         <p className="import-sub">How would you like to load ticket data?</p>
         <div className="landing-options">
+          <div className="landing-card" onClick={() => setLandingMode("neutara")}>
+            <div className="lc-icon">🎫</div>
+            <div className="lc-title">Load from Neutara</div>
+            <div className="lc-desc">Fetch all live tickets from neutaraticketing.cftools.live</div>
+          </div>
           <div className="landing-card" onClick={() => setLandingMode("excel")}>
             <div className="lc-icon">📊</div>
             <div className="lc-title">Upload Excel</div>
-            <div className="lc-desc">Drop an .xlsx / .csv file exported from Jira</div>
-          </div>
-          <div className="landing-card" onClick={() => setLandingMode("jira")}>
-            <div className="lc-icon">🔗</div>
-            <div className="lc-title">Connect to Jira</div>
-            <div className="lc-desc">Fetch live tickets via the backend API · see full ticket history</div>
+            <div className="lc-desc">Drop an .xlsx / .csv file with ticket data</div>
           </div>
         </div>
       </div>
@@ -368,8 +368,8 @@ export default function App() {
               </span>
             )}
             {!isDemo && (
-              <button className="btn-sm" onClick={() => { setFileData(generateDemoData()); setHistoryKey(null); }}>
-                ↩ Reset data
+              <button className="btn-sm" onClick={() => { setFileData(null); setHistoryKey(null); setLandingMode("choose"); }}>
+                ↩ Load data
               </button>
             )}
             <span className="topbar-profile" title={backendConnected ? `Signed in as ${currentUser}` : "Not signed in — using local/sample data"}>
