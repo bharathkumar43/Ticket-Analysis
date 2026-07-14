@@ -15,6 +15,7 @@ import exportRoutes from './routes/export'
 import actionItemRoutes from './routes/actionItems'
 import emailSettingsRoutes from './routes/emailSettings'
 import monthlyUploadRoutes from './routes/monthlyUploads'
+import neutaraRoutes from './routes/neutara'
 import { authMiddleware } from './middleware/auth'
 
 const app = express()
@@ -45,6 +46,7 @@ app.use('/api/export', authMiddleware, exportRoutes)
 app.use('/api/action-items', authMiddleware, actionItemRoutes)
 app.use('/api/email-settings', authMiddleware, emailSettingsRoutes)
 app.use('/api/monthly-uploads', authMiddleware, monthlyUploadRoutes)
+app.use('/api/neutara', authMiddleware, neutaraRoutes)
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok' }))

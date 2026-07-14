@@ -8,6 +8,7 @@ import { ActionItems } from "./ActionItems.jsx";
 import { MigrationManagers } from "./MigrationManagers.jsx";
 import { EmailSettings } from "./EmailSettings.jsx";
 import { MonthlyDataStore } from "./MonthlyDataStore.jsx";
+import { NeutaraTickets } from "./NeutaraTickets.jsx";
 import { generateDemoData } from "./demoData.js";
 import { makeLocalActionItemsStore } from "./actionItemsStore.js";
 import { makeBackendActionItemsStore } from "./actionItemsApi.js";
@@ -208,6 +209,7 @@ export default function App() {
   const [managersFileData, setManagersFileData] = useState(null); // { rows, columns, fileName }
   const [showMbrArchive,   setShowMbrArchive]   = useState(false);
   const [showMgrArchive,   setShowMgrArchive]   = useState(false);
+  const [showNeutara,      setShowNeutara]      = useState(false);
   const [subTab,      setSubTab]      = useState(ANALYTICS_TABS[0]);
   const [managerTab,  setManagerTab]  = useState(MANAGER_SEGMENT_TABS[0]);
   const [jiraCtx,     setJiraCtx]     = useState(() => {                // { backendUrl, beToken, jiraCreds } | null
@@ -456,8 +458,19 @@ export default function App() {
                   <button className="btn-sm" onClick={() => setShowMgrArchive((v) => !v)}>
                     📁 {showMgrArchive ? "Hide Archive" : "Archive"}
                   </button>
+                  <button
+                    className={"btn-sm" + (showNeutara ? " active" : "")}
+                    onClick={() => setShowNeutara((v) => !v)}
+                    style={{ background: showNeutara ? "var(--accent)" : undefined, color: showNeutara ? "#fff" : undefined }}
+                  >
+                    🎫 {showNeutara ? "Hide Live Tickets" : "Live Tickets"}
+                  </button>
                 </div>
               </div>
+
+              {showNeutara && (
+                <NeutaraTickets beToken={jiraCtx?.beToken} />
+              )}
 
               {showMgrArchive && (
                 <MonthlyDataStore
