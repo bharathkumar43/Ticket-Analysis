@@ -19,7 +19,11 @@ router.get('/live-issues', async (req, res) => {
     res.status(400).json({ error: { code: 'NEUTARA_NOT_CONFIGURED', message: 'Set NEUTARA_BASE_URL and NEUTARA_API_KEY in .env and restart.' } })
     return
   }
-  const max = req.query.max ? parseInt(req.query.max as string, 10) : 500
+  // Give this route 5 minutes — Neutara API can be slow for large fetches
+  req.socket.setTimeout(300000)
+  res.setTimeout(300000)
+
+  const max = req.query.max ? parseInt(req.query.max as string, 10) : 200
   try {
     const result = await neutaraService.fetchLiveIssues(max)
     res.json(result)

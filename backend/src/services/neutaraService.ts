@@ -60,7 +60,7 @@ export class NeutaraService {
     return axios.create({
       baseURL: baseUrl,
       headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
-      timeout: 30000,
+      timeout: 120000, // 2 minutes per request — Neutara API can be slow
     })
   }
 
@@ -74,40 +74,46 @@ export class NeutaraService {
   }
 
   async fetchLiveIssues(
-    maxResults = 500,
+    maxResults = 200,
   ): Promise<{ rows: any[]; total: number; warnings: string[] }> {
     const { baseUrl, apiKey } = getNeutaraConfig()
     if (!baseUrl || !apiKey) {
       throw new Error('Neutara is not configured. Set NEUTARA_BASE_URL and NEUTARA_API_KEY in .env and restart.')
     }
 
-    const client   = this.getClient()
-    const pageSize = 100
-    const rows: any[] = []
-    let page       = 1
-    let total      = 0
-    let totalPages = 1
+    const client    = this.getClient()
+    const pageSize  = 50  // smaller pages respond faster
+    const PARALLEL  = 3   // fetch 3 pages at once
 
-    do {
-      const res  = await client.get('/api/issues', { params: { limit: pageSize, page } })
-      const data = res.data
+    // Fetch page 1 first to get total count
+    const first = await client.get('/api/issues', { params: { limit: pageSize, page: 1 } })
+    const total      = first.data.total      ?? 0
+    const totalPages = first.data.totalPages ?? 1
+    const rows: any[] = (first.data.issues || []).map(normalizeIssue)
 
-      total      = data.total      ?? 0
-      totalPages = data.totalPages ?? 1
+    // Calculate remaining pages needed (up to maxResults)
+    const pagesNeeded = Math.min(totalPages, Math.ceil(maxResults / pageSize))
+    const remainingPages = Array.from({ length: pagesNeeded - 1 }, (_, i) => i + 2)
 
-      for (const issue of (data.issues || [])) {
-        rows.push(normalizeIssue(issue))
+    // Fetch remaining pages in parallel batches of PARALLEL
+    for (let i = 0; i < remainingPages.length && rows.length < maxResults; i += PARALLEL) {
+      const batch = remainingPages.slice(i, i + PARALLEL)
+      const results = await Promise.all(
+        batch.map(page => client.get('/api/issues', { params: { limit: pageSize, page } }))
+      )
+      for (const res of results) {
+        for (const issue of (res.data.issues || [])) {
+          rows.push(normalizeIssue(issue))
+        }
       }
-
-      page++
-    } while (page <= totalPages && rows.length < maxResults)
-
-    const warnings: string[] = []
-    if (rows.length >= maxResults) {
-      warnings.push(`Showing first ${maxResults} of ${total} tickets. The data source has more.`)
     }
 
-    return { rows, total, warnings }
+    const warnings: string[] = []
+    if (total > maxResults) {
+      warnings.push(`Showing ${rows.length} of ${total.toLocaleString()} total tickets.`)
+    }
+
+    return { rows: rows.slice(0, maxResults), total, warnings }
   }
 }
 
