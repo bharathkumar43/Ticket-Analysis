@@ -6,18 +6,20 @@ const DEFAULT_BACKEND = import.meta.env.VITE_BACKEND_URL || window.location.orig
 export function NeutaraConnect({ onLoad }) {
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
-  const [jql,     setJql]     = useState("ORDER BY created DESC");
+  const [progress, setProgress] = useState("");
 
   async function handleLoad(e) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setProgress("Connecting to Neutara…");
     try {
       const session = loadSession();
       if (!session?.beToken) throw new Error("Not logged in. Please refresh and sign in again.");
 
-      const url = `${DEFAULT_BACKEND}/api/neutara/live-issues?jql=${encodeURIComponent(jql.trim() || "ORDER BY created DESC")}`;
-      const res = await fetch(url, {
+      setProgress("Fetching tickets (this may take a moment for large datasets)…");
+
+      const res = await fetch(`${DEFAULT_BACKEND}/api/neutara/live-issues`, {
         headers: { Authorization: `Bearer ${session.beToken}` },
       });
 
@@ -27,8 +29,9 @@ export function NeutaraConnect({ onLoad }) {
       }
 
       const data = await res.json();
-      if (!data.rows?.length) throw new Error("No tickets returned. Check the JQL or API key.");
+      if (!data.rows?.length) throw new Error("No tickets returned. Check if NEUTARA_API_KEY is set on the server.");
 
+      setProgress("");
       onLoad({
         rows:           data.rows,
         fileName:       "Neutara Live",
@@ -44,6 +47,7 @@ export function NeutaraConnect({ onLoad }) {
       });
     } catch (err) {
       setError(err.message);
+      setProgress("");
     } finally {
       setLoading(false);
     }
@@ -54,32 +58,20 @@ export function NeutaraConnect({ onLoad }) {
       <div className="jc-header">
         <span className="jc-icon">🎫</span>
         <h2>Load from Neutara</h2>
-        <p>Fetch live tickets from neutaraticketing.cftools.live</p>
+        <p>Fetch all live tickets from neutaraticketing.cftools.live</p>
       </div>
 
-      <div className="jc-fields">
-        <label className="jc-label">
-          JQL Filter <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional — leave blank for all tickets)</span>
-          <input
-            className="jc-input"
-            value={jql}
-            onChange={(e) => setJql(e.target.value)}
-            placeholder="ORDER BY created DESC"
-          />
-        </label>
-      </div>
+      {error && <div className="jc-error" style={{ marginBottom: 16 }}>⚠️ {error}</div>}
 
-      {error && <div className="jc-error">⚠️ {error}</div>}
+      {progress && (
+        <p style={{ textAlign: "center", color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>
+          ⏳ {progress}
+        </p>
+      )}
 
       <button className="jc-btn" type="submit" disabled={loading}>
         {loading ? "Loading tickets…" : "Load All Tickets"}
       </button>
-
-      {loading && (
-        <p style={{ textAlign: "center", color: "var(--muted)", fontSize: 13, marginTop: 12 }}>
-          Fetching all tickets — this may take a moment…
-        </p>
-      )}
     </form>
   );
 }

@@ -5,8 +5,8 @@ import { getNeutaraConfig } from '../lib/neutaraConfig'
 const router = Router()
 
 router.get('/config', (req, res) => {
-  const { baseUrl, email } = getNeutaraConfig()
-  res.json({ baseUrl, email, configured: neutaraService.isConfigured() })
+  const { baseUrl } = getNeutaraConfig()
+  res.json({ baseUrl, configured: neutaraService.isConfigured() })
 })
 
 router.get('/test', async (req, res) => {
@@ -16,20 +16,16 @@ router.get('/test', async (req, res) => {
 
 router.get('/live-issues', async (req, res) => {
   if (!neutaraService.isConfigured()) {
-    res.status(400).json({ error: { code: 'NEUTARA_NOT_CONFIGURED', message: 'Set NEUTARA_BASE_URL and NEUTARA_API_KEY in .env' } })
+    res.status(400).json({ error: { code: 'NEUTARA_NOT_CONFIGURED', message: 'Set NEUTARA_BASE_URL and NEUTARA_API_KEY in .env and restart.' } })
     return
   }
-  const { jql, max } = req.query as { jql?: string; max?: string }
+  const max = req.query.max ? parseInt(req.query.max as string, 10) : 500
   try {
-    const result = await neutaraService.fetchLiveIssues(
-      jql?.trim() || 'ORDER BY created DESC',
-      max ? parseInt(max, 10) : 500,
-    )
+    const result = await neutaraService.fetchLiveIssues(max)
     res.json(result)
   } catch (err: any) {
     const msg = err?.message || 'Fetch failed'
-    const isAuth = msg.includes('401') || msg.includes('Authentication failed') || msg.includes('auth')
-    res.status(isAuth ? 502 : 500).json({ error: { code: isAuth ? 'NEUTARA_AUTH_FAILED' : 'FETCH_ERROR', message: msg } })
+    res.status(500).json({ error: { code: 'FETCH_ERROR', message: msg } })
   }
 })
 

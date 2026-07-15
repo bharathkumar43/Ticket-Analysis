@@ -31,7 +31,7 @@ export function NeutaraTickets({ beToken }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${DEFAULT_BACKEND}/api/neutara/live-issues`, {
+      const res = await fetch(`${DEFAULT_BACKEND}/api/neutara/live-issues?max=500`, {
         headers: { Authorization: `Bearer ${beToken}` },
       });
       if (!res.ok) {
