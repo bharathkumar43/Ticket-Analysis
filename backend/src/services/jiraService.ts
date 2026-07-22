@@ -277,6 +277,9 @@ export class JiraService {
 
     const createdAt  = f.created         ? new Date(f.created)         : null
     const resolvedAt = f.resolutiondate  ? new Date(f.resolutiondate)  : null
+    const updatedAt  = f.updated         ? new Date(f.updated)         : null
+    const dueDate    = f.duedate         ? new Date(f.duedate)         : null
+    const labels     = Array.isArray(f.labels) ? f.labels.join(', ') : (f.labels || '')
 
     let resolutionDays: number | null = null
     if (createdAt) {
@@ -289,6 +292,8 @@ export class JiraService {
     const slaBreached = resolutionDays !== null && resolutionDays > threshold ? 'Yes' : 'No'
 
     const combination = f[fieldMap.combination] || ''
+    const rawPM = f[fieldMap.projectManager]
+    const projectManager = rawPM?.displayName || rawPM || null
 
     return {
       key,
@@ -301,8 +306,12 @@ export class JiraService {
       resolutionDays,
       slaBreached,
       createdAt,
+      updatedAt,
       resolvedAt,
+      dueDate,
+      labels,
       project,
+      projectManager,
     }
   }
 
@@ -320,8 +329,8 @@ export class JiraService {
     const client = this.getClient(creds)
     const fields = [
       'issuetype', 'summary', 'assignee', 'priority', 'status',
-      'resolution', 'created', 'updated', 'resolutiondate',
-      config.fieldMap.combination,
+      'resolution', 'created', 'updated', 'resolutiondate', 'duedate', 'labels',
+      config.fieldMap.combination, config.fieldMap.projectManager,
     ]
 
     const rows: any[] = []

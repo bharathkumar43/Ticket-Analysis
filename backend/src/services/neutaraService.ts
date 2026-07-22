@@ -9,6 +9,15 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
 }
 
+// Weekends don't count against the SLA clock — matches jira-dashboard's
+// parseExcel.js calendarToBusinessDays so Excel uploads and live Neutara
+// fetches agree on the same ticket's breach status.
+function calendarToBusinessDays(calDays: number): number {
+  const weeks = Math.floor(calDays / 7)
+  const remainder = calDays % 7
+  return weeks * 5 + Math.min(remainder, 5)
+}
+
 function normalizeIssue(issue: any): any {
   const priority    = capitalize(issue.priority || 'medium')
   const status      = issue.status?.name || ''
@@ -45,7 +54,11 @@ function normalizeIssue(issue: any): any {
     updatedAt:      issue.updatedAt     || null,
     resolvedAt:     issue.resolvedAt    || null,
     resolutionDays,
-    slaBreached:    resolutionDays !== null && resolutionDays > (SLA_DAYS[priority] ?? 5) ? 'Yes' : 'No',
+    slaBreached: (() => {
+      if (resolutionDays === null) return 'No'
+      const businessDays = calendarToBusinessDays(resolutionDays)
+      return businessDays > (SLA_DAYS[priority] ?? 5) ? 'Yes' : 'No'
+    })(),
   }
 }
 

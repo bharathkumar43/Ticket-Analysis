@@ -6,7 +6,9 @@ const COL_VARIANTS = {
   key:            ["key", "ticket key", "issue key", "ticket id", "id"],
   summary:        ["summary", "title", "subject", "description", "issue summary"],
   assignee:       ["assignee", "assigned to", "owner", "engineer"],
+  projectManager: ["project manager", "pm", "manager", "account manager", "migration manager"],
   priority:       ["priority"],
+  labels:         ["labels", "label", "tags"],
   status:         ["status", "ticket status", "state", "current status"],
   issueType:      ["issue type", "type", "ticket type", "issuetype", "kind", "category"],
   combination:    ["combination", "migration path", "path", "route", "migration route",
@@ -27,6 +29,8 @@ const COL_VARIANTS = {
   resolvedDate:   ["resolved", "resolved date", "resolution date", "date resolved", "closed",
                    "close date", "resolved at", "completed", "completion date",
                    "done date", "close on", "closed on", "closed date"],
+  updatedDate:    ["updated", "last updated", "update date", "updated at", "modified"],
+  dueDate:        ["due date", "due", "sla due", "target date"],
 };
 
 // "Done" synonyms — ticket is considered resolved if resolution matches any of these
@@ -239,6 +243,8 @@ export function parseExcelFile(file) {
             const key         = getString(r, "key")       || `ROW-${i + 1}`;
             const summary     = getString(r, "summary");
             const assignee    = getString(r, "assignee")  || "Unassigned";
+            const projectManager = getString(r, "projectManager") || null;
+            const labels      = getString(r, "labels") || "";
             const rawPrio     = getString(r, "priority");
             const priority    = PRIO_VALID.has(rawPrio) ? rawPrio : "Medium";
             const issueType   = getString(r, "issueType") || "Task";
@@ -304,13 +310,10 @@ export function parseExcelFile(file) {
               slaBreached = isBreached ? "Yes" : "No";
             } else if (resolutionDays !== null && SLA_THRESHOLDS[priority]) {
               // No SLA column — fall back to business-day calculation.
-              // Only flag RESOLVED tickets; open tickets are still in progress.
-              const sl = status.toLowerCase();
-              const ticketIsResolved =
-                ["resolved", "closed", "done", "completed", "fixed"].includes(sl) ||
-                isDoneResolution(resolutionText);
+              // resolutionDays is already "age so far" for open tickets (see fallback #3
+              // above), so an open ticket past threshold is breaching right now — flag it.
               const businessDays = calendarToBusinessDays(resolutionDays);
-              slaBreached = (ticketIsResolved && businessDays > SLA_THRESHOLDS[priority]) ? "Yes" : "No";
+              slaBreached = (businessDays > SLA_THRESHOLDS[priority]) ? "Yes" : "No";
             } else {
               slaBreached = "No";
             }
@@ -322,12 +325,19 @@ export function parseExcelFile(file) {
             const resolvedAt = hasResolvedDate
               ? (toDate(getRaw(r, "resolvedDate") ?? getString(r, "resolvedDate")) ?? null)
               : null;
+            const updatedAt = bestMapping.updatedDate
+              ? (toDate(getRaw(r, "updatedDate") ?? getString(r, "updatedDate")) ?? null)
+              : null;
+            const dueDate = bestMapping.dueDate
+              ? (toDate(getRaw(r, "dueDate") ?? getString(r, "dueDate")) ?? null)
+              : null;
 
             // ── Project key (prefix before first hyphen in ticket key) ─────────
             const project = key.includes("-") ? key.split("-")[0].toUpperCase() : "";
 
             return { key, summary, assignee, priority, status, issueType, combination,
-                     resolutionDays, slaBreached, createdAt, resolvedAt, project };
+                     resolutionDays, slaBreached, createdAt, updatedAt, resolvedAt, dueDate,
+                     labels, project, projectManager };
           });
 
         // ── Warnings ──────────────────────────────────────────────────────────

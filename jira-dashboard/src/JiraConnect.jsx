@@ -1,10 +1,7 @@
 import React, { useState } from "react";
-import {
-  loginBackend, fetchJiraConfig, fetchLiveIssues, saveSession,
-} from "./jiraApi.js";
+import { loadSession, fetchLiveIssues } from "./jiraApi.js";
 
-const DEFAULT_BACKEND  = import.meta.env.VITE_BACKEND_URL || window.location.origin;
-const DEFAULT_JIRA_URL = "https://cf2020.atlassian.net";
+const DEFAULT_BACKEND = import.meta.env.VITE_BACKEND_URL || window.location.origin;
 const DEFAULT_JQL      = "project in (CFITS, PRI) ORDER BY updated DESC";
 
 const JQL_PRESETS = [
@@ -15,92 +12,25 @@ const JQL_PRESETS = [
   { label: "PRI only",                         jql: "project = PRI ORDER BY updated DESC" },
 ];
 
+// Pulls tickets straight from Jira using the API key already configured on the
+// backend (JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN in backend/.env) — no
+// per-user credential entry, same one-click pattern as Load from Neutara.
 export function JiraConnect({ onLoad }) {
-  // Backend credentials (app login)
-  const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND);
-  const [username,   setUsername]   = useState("admin");
-  const [password,   setPassword]   = useState("changeme");
+  const [jql, setJql] = useState(DEFAULT_JQL);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Jira credentials (your personal Jira access)
-  const [jiraBaseUrl, setJiraBaseUrl] = useState(DEFAULT_JIRA_URL);
-  const [jiraEmail,   setJiraEmail]   = useState("laxman.kadari@cloudfuze.com");
-  const [jiraToken,   setJiraToken]   = useState("");
-
-  // JQL
-  const [jql,  setJql]  = useState(DEFAULT_JQL);
-
-  // UI state
-  const [step,       setStep]       = useState("idle");
-  const [error,      setError]      = useState(null);
-  const [testResult, setTestResult] = useState(null); // { count, jql } | null
-  const [testing,    setTesting]    = useState(false);
-
-  async function handleTestJql(e) {
+  async function handleLoad(e) {
     e.preventDefault();
-    setTestResult(null);
+    setLoading(true);
     setError(null);
-    const jiraCreds = {
-      email:    jiraEmail.trim(),
-      apiToken: jiraToken.trim(),
-      baseUrl:  jiraBaseUrl.replace(/\/$/, ""),
-    };
-    if (!jiraCreds.email || !jiraCreds.apiToken) {
-      setError("Enter your Jira email and API token first.");
-      return;
-    }
-    const effectiveJql = jql.trim() || DEFAULT_JQL;
-    setTesting(true);
     try {
-      const beToken = await loginBackend(backendUrl, username, password);
-      const result  = await fetchLiveIssues(backendUrl, beToken, effectiveJql, jiraCreds);
-      setTestResult({ count: result.rows.length, jql: effectiveJql });
-    } catch (err) {
-      setError("Test failed: " + err.message);
-    } finally {
-      setTesting(false);
-    }
-  }
+      const session = loadSession();
+      if (!session?.beToken) throw new Error("Not logged in. Please refresh and sign in again.");
 
-  async function handleFetch(e) {
-    e.preventDefault();
-    setError(null);
+      const effectiveJql = jql.trim() || DEFAULT_JQL;
+      const result = await fetchLiveIssues(DEFAULT_BACKEND, session.beToken, effectiveJql);
 
-    const jiraCreds = {
-      email:   jiraEmail.trim(),
-      apiToken: jiraToken.trim(),
-      baseUrl:  jiraBaseUrl.replace(/\/$/, ""),
-    };
-
-    if (!jiraCreds.email || !jiraCreds.apiToken) {
-      setError("Enter your Jira email and API token.");
-      return;
-    }
-
-    try {
-      // 1. Login to backend
-      setStep("login");
-      const beToken = await loginBackend(backendUrl, username, password);
-
-      // 2. Get default JQL if blank
-      let effectiveJql = jql.trim();
-      if (!effectiveJql) {
-        setStep("config");
-        try {
-          const cfg = await fetchJiraConfig(backendUrl, beToken);
-          effectiveJql = cfg.jql || "";
-          if (effectiveJql) setJql(effectiveJql);
-        } catch (_) {}
-      }
-      if (!effectiveJql) effectiveJql = DEFAULT_JQL;
-
-      // 3. Fetch tickets from Jira
-      setStep("fetch");
-      const result = await fetchLiveIssues(backendUrl, beToken, effectiveJql, jiraCreds);
-
-      // 4. Save session
-      saveSession(backendUrl, beToken, jiraCreds.email, jiraCreds.apiToken, jiraCreds.baseUrl);
-
-      setStep("done");
       onLoad({
         rows:           result.rows,
         fileName:       "Jira Live",
@@ -109,55 +39,26 @@ export function JiraConnect({ onLoad }) {
         columnNames:    [],
         mapping:        {},
         warnings:       result.warnings || [],
-        jiraBackendUrl: backendUrl,
-        jiraToken:      beToken,
-        jiraCreds,
+        jiraBackendUrl: DEFAULT_BACKEND,
+        jiraToken:      session.beToken,
+        jiraCreds:      null,
       });
     } catch (err) {
       setError(err.message);
-      setStep("idle");
+    } finally {
+      setLoading(false);
     }
   }
 
-  const busy = step !== "idle" && step !== "done";
-  const stepLabel = {
-    login:  "Authenticating with backend…",
-    config: "Loading Jira configuration…",
-    fetch:  "Fetching tickets from Jira…",
-  }[step];
-
   return (
-    <form className="jc-form" onSubmit={handleFetch}>
+    <form className="jc-form" onSubmit={handleLoad}>
       <div className="jc-header">
         <span className="jc-icon">🔗</span>
-        <h2>Connect to Jira</h2>
-        <p>Enter your Jira credentials to pull live ticket data</p>
+        <h2>Load from Jira</h2>
+        <p>Fetch live tickets directly from Jira using the configured API key</p>
       </div>
 
-      {/* ── Jira credentials ── */}
-      <div className="jc-section-label">Your Jira Credentials</div>
       <div className="jc-fields">
-        <label className="jc-label">
-          Jira Base URL
-          <input className="jc-input" value={jiraBaseUrl}
-            onChange={(e) => setJiraBaseUrl(e.target.value.trim())}
-            placeholder="https://yourcompany.atlassian.net" required />
-        </label>
-        <label className="jc-label">
-          Jira Email
-          <input className="jc-input" type="email" value={jiraEmail}
-            onChange={(e) => setJiraEmail(e.target.value)}
-            placeholder="you@company.com" required />
-        </label>
-        <label className="jc-label">
-          Jira API Token
-          <input className="jc-input" type="password" value={jiraToken}
-            onChange={(e) => setJiraToken(e.target.value)}
-            placeholder="Your Jira API token" required />
-          <span className="jc-hint">
-            Generate at <strong>id.atlassian.net → Security → API tokens</strong>
-          </span>
-        </label>
         <label className="jc-label">
           JQL Query
           <select className="jc-input jc-select"
@@ -169,59 +70,16 @@ export function JiraConnect({ onLoad }) {
             <option value="__custom__">Custom…</option>
           </select>
           <textarea className="jc-input jc-textarea" value={jql}
-            onChange={(e) => { setJql(e.target.value); setTestResult(null); }}
+            onChange={(e) => setJql(e.target.value)}
             placeholder="project in (CFITS, PRI) ORDER BY updated DESC"
             rows={2} style={{ marginTop: 6 }} />
-          <div className="jc-jql-row">
-            <button type="button" className="jc-test-btn" onClick={handleTestJql} disabled={testing || busy}>
-              {testing ? "Testing…" : "Test Query"}
-            </button>
-            {testResult && (
-              <span className={`jc-test-result ${testResult.count === 0 ? "jc-test-zero" : "jc-test-ok"}`}>
-                {testResult.count === 0
-                  ? "⚠️ 0 tickets — check your JQL"
-                  : `✓ ${testResult.count} ticket${testResult.count !== 1 ? "s" : ""} found`}
-              </span>
-            )}
-          </div>
         </label>
       </div>
 
-      {/* ── Backend credentials (collapsible) ── */}
-      <details className="jc-advanced">
-        <summary className="jc-advanced-toggle">Backend connection settings</summary>
-        <div className="jc-fields" style={{ marginTop: 10 }}>
-          <label className="jc-label">
-            Backend URL
-            <input className="jc-input" value={backendUrl}
-              onChange={(e) => setBackendUrl(e.target.value.trim())}
-              placeholder="http://localhost:3001" />
-          </label>
-          <label className="jc-label">
-            Username
-            <input className="jc-input" value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="admin" />
-          </label>
-          <label className="jc-label">
-            Password
-            <input className="jc-input" type="password" value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••" />
-          </label>
-        </div>
-      </details>
+      {error && <div className="jc-error" style={{ marginBottom: 16 }}>⚠️ {error}</div>}
 
-      {stepLabel && (
-        <div className="jc-step-label">
-          <span className="jc-spinner">⏳</span> {stepLabel}
-        </div>
-      )}
-
-      {error && <div className="jc-error">⚠️ {error}</div>}
-
-      <button className="jc-btn" type="submit" disabled={busy}>
-        {busy ? "Connecting…" : "Fetch Tickets from Jira"}
+      <button className="jc-btn" type="submit" disabled={loading}>
+        {loading ? "Loading tickets…" : "Load Tickets from Jira"}
       </button>
     </form>
   );

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { BarChartCard, PieChartCard } from "./components/Charts.jsx";
 import { ExcelImport } from "./ExcelImport.jsx";
 import { NeutaraConnect } from "./NeutaraConnect.jsx";
+import { JiraConnect } from "./JiraConnect.jsx";
 import { Login } from "./Login.jsx";
 import { TicketHistory } from "./TicketHistory.jsx";
 import { ActionItems } from "./ActionItems.jsx";
@@ -9,6 +10,9 @@ import { MigrationManagers } from "./MigrationManagers.jsx";
 import { EmailSettings } from "./EmailSettings.jsx";
 import { MonthlyDataStore } from "./MonthlyDataStore.jsx";
 import { NeutaraTickets } from "./NeutaraTickets.jsx";
+import { SlaWorkflow } from "./SlaWorkflow.jsx";
+import { TicketsByTeamReport } from "./TicketsByTeamReport.jsx";
+import { TicketHygiene } from "./TicketHygiene.jsx";
 import { generateDemoData } from "./demoData.js";
 import { makeLocalActionItemsStore } from "./actionItemsStore.js";
 import { makeBackendActionItemsStore } from "./actionItemsApi.js";
@@ -27,16 +31,21 @@ const ANALYTICS_TABS = ["Tickets Resolved", "Assignee with SLA", "Ticket Ageing"
 const MANAGER_SEGMENT_TABS = ["ENT", "SMB"];
 
 // Sections that are real, working pages in this app.
-const REAL_SECTIONS = new Set(["MBR Analytics", "Action Items", "Migration Managers", "History"]);
+const REAL_SECTIONS = new Set(["MBR Analytics", "Action Items", "Migration Managers", "History", "SLA Workflow", "Team Report", "Ticket Hygiene"]);
 
 const NAV_GROUPS = [
   { label: "Analytics", items: [
     { name: "MBR Analytics",      icon: "🎫" },
     { name: "Migration Managers", icon: "🧭" },
+    { name: "Team Report",        icon: "👥" },
+    { name: "Ticket Hygiene",     icon: "🧹" },
   ]},
   { label: "Actions", items: [
     { name: "Action Items", icon: "📋" },
     { name: "History",      icon: "🗂️" },
+  ]},
+  { label: "Guides", items: [
+    { name: "SLA Workflow", icon: "📖" },
   ]},
 ];
 
@@ -295,6 +304,15 @@ export default function App() {
       </div>
     );
   }
+  if (landingMode === "jira") {
+    return (
+      <div className="import-wrap" style={{ position: "relative" }}>
+        <button className="btn-sm" style={{ position: "fixed", top: 16, left: 16, zIndex: 10 }}
+          onClick={() => setLandingMode("choose")}>← Back</button>
+        <JiraConnect onLoad={handleLoad} />
+      </div>
+    );
+  }
 
   /* ── Landing screen (only reached if there's somehow no data at all) ── */
   if (!fileData) {
@@ -308,6 +326,11 @@ export default function App() {
             <div className="lc-icon">🎫</div>
             <div className="lc-title">Load from Neutara</div>
             <div className="lc-desc">Fetch all live tickets from neutaraticketing.cftools.live</div>
+          </div>
+          <div className="landing-card" onClick={() => setLandingMode("jira")}>
+            <div className="lc-icon">🔗</div>
+            <div className="lc-title">Load from Jira</div>
+            <div className="lc-desc">Fetch live tickets directly from Jira via JQL</div>
           </div>
           <div className="landing-card" onClick={() => setLandingMode("excel")}>
             <div className="lc-icon">📊</div>
@@ -388,11 +411,12 @@ export default function App() {
           {section === "MBR Analytics" && (
             <div className="file-bar" style={{ background: isDemo ? "#fffbeb" : "var(--panel2)", borderColor: isDemo ? "var(--amber)" : "var(--border)" }}>
               {isDemo
-                ? <span>🧪 <strong>Viewing sample data</strong> — upload your own ticket export or connect to Jira to see real numbers.</span>
+                ? <span>🧪 <strong>Viewing sample data</strong> — upload your own ticket export, or load live from Neutara or Jira, to see real numbers.</span>
                 : <span>📊 <strong>{fileData?.fileName || "Uploaded data"}</strong> — {num(rows.length)} tickets loaded</span>
               }
               {isDemo && <button className="btn-sm" onClick={() => setLandingMode("excel")}>📊 Upload Excel</button>}
-              {isDemo && <button className="btn-sm" onClick={() => setLandingMode("jira")}>🔗 Connect to Jira</button>}
+              {isDemo && <button className="btn-sm" onClick={() => setLandingMode("neutara")}>🎫 Load from Neutara</button>}
+              {isDemo && <button className="btn-sm" onClick={() => setLandingMode("jira")}>🔗 Load from Jira</button>}
               <button className="btn-sm" style={{ marginLeft: "auto" }} onClick={() => setShowMbrArchive((v) => !v)}>
                 📁 {showMbrArchive ? "Hide Archive" : "Monthly Archive"}
               </button>
@@ -507,6 +531,20 @@ export default function App() {
             </>
           )}
           {section === "History" && <HistoryPage items={actionItemsSnapshot} />}
+          {section === "SLA Workflow" && (
+            <SlaWorkflow
+              rows={rows}
+              isDemo={isDemo}
+              fileName={fileData?.fileName}
+              onGoToUpload={() => setLandingMode("excel")}
+              onGoToNeutara={() => setLandingMode("neutara")}
+              onGoToJira={() => setLandingMode("jira")}
+            />
+          )}
+          {section === "Team Report" && (
+            <TicketsByTeamReport backendUrl={jiraCtx?.backendUrl} beToken={jiraCtx?.beToken} />
+          )}
+          {section === "Ticket Hygiene" && <TicketHygiene rows={rows} />}
           {!REAL_SECTIONS.has(section) && (
             <ComingSoon title={section} icon={NAV_GROUPS.flatMap((g) => g.items).find((i) => i.name === section)?.icon} />
           )}
