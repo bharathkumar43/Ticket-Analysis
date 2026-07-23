@@ -86,9 +86,10 @@ function jiraHeaders(beToken, jiraCreds) {
   return h;
 }
 
-export async function fetchLiveIssues(backendUrl, beToken, jql, jiraCreds) {
+export async function fetchLiveIssues(backendUrl, beToken, jql, jiraCreds, max) {
+  const maxParam = max ? `&max=${encodeURIComponent(max)}` : "";
   return apiFetch(
-    `${backendUrl}/api/jira/live-issues?jql=${encodeURIComponent(jql)}`,
+    `${backendUrl}/api/jira/live-issues?jql=${encodeURIComponent(jql)}${maxParam}`,
     { headers: jiraHeaders(beToken, jiraCreds) }
   );
 }

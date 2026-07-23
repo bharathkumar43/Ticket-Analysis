@@ -70,13 +70,16 @@ router.get('/live-issues', async (req, res) => {
     res.status(400).json({ error: { code: 'JIRA_NOT_CONFIGURED', message: 'Enter your Jira email, API token and base URL in the Connect form.' } })
     return
   }
-  const { jql } = req.query as { jql?: string }
+  const { jql, max } = req.query as { jql?: string; max?: string }
   if (!jql?.trim()) {
     res.status(400).json({ error: { code: 'MISSING_JQL', message: 'jql query parameter is required' } })
     return
   }
+  // Default high enough that a full team/board report doesn't silently truncate —
+  // callers that genuinely want a quick preview can pass a smaller ?max=.
+  const maxResults = max ? parseInt(max, 10) : 2000
   try {
-    const result = await jiraService.fetchLiveIssues(jql.trim(), 500, creds)
+    const result = await jiraService.fetchLiveIssues(jql.trim(), maxResults, creds)
     res.json(result)
   } catch (err: any) {
     const msg = err?.message || 'Fetch failed'
