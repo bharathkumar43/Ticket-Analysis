@@ -3,7 +3,7 @@ import { TICKET_TEAMS } from "./ticketTeams.js";
 import { isResolved } from "./utils.js";
 import { fetchLiveIssues } from "./jiraApi.js";
 
-const DEFAULT_JQL = "project in (CFITS, PRI) ORDER BY updated DESC";
+const DEFAULT_JQL = "project in (CFITS, PRI, L2B) ORDER BY updated DESC";
 
 function downloadCsv(filename, headers, rows) {
   const csv = [headers, ...rows]
