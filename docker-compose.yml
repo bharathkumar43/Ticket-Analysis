@@ -1,0 +1,11 @@
+services:
+  ticket-hygiene-app:
+    build: .
+    image: ticket-hygiene-app:latest
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      # Persists NTA credentials (data/config.json), the synced-ticket cache, and any
+      # uploaded Excel file across container restarts/redeploys.
+      - ./data:/app/data

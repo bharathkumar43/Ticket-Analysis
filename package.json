@@ -1,0 +1,17 @@
+{
+  "name": "jira-hygiene-app",
+  "version": "1.0.0",
+  "description": "Standalone ticket hygiene dashboard (Live Neutara Ticketing + Excel upload).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/test-nta-pagination.js && node test/test-nta-mapper.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^2.0.0",
+    "xlsx": "^0.18.5"
+  }
+}

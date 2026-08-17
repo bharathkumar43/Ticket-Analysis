@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ticket Hygiene Dashboard</title>
+<link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+<div class="modal-overlay" id="detailModalOverlay">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div>
+        <h3 id="detailModalTitle">Details</h3>
+        <div class="modal-sub" id="detailModalSub"></div>
+      </div>
+      <button class="modal-close" id="detailModalCloseBtn" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body" id="detailModalBody"><div class="empty-state">Loading…</div></div>
+  </div>
+</div>
+
+<h1>Ticket Hygiene Dashboard</h1>
+<p class="sub">Team-segregated backlog health and per-person hygiene. Configure Neutara Ticketing in <b>Settings</b> to enable the Live sections, and/or upload an Excel export for the file-backed tabs.</p>
+
+<div class="controls">
+  <div class="field">
+    <label>From</label>
+    <input type="date" id="fromDate">
+  </div>
+  <div class="field">
+    <label>To</label>
+    <input type="date" id="toDate">
+  </div>
+  <div class="field">
+    <label>Quick range</label>
+    <div class="preset-row">
+      <button class="preset" data-days="7">7d</button>
+      <button class="preset" data-days="14">14d</button>
+      <button class="preset" data-days="30">30d</button>
+      <button class="preset" data-days="60">60d</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Stale threshold</label>
+    <select id="staleSel">
+      <option value="3">3 days</option>
+      <option value="7" selected>7 days</option>
+      <option value="14">14 days</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>&nbsp;</label>
+    <button class="primary" id="applyBtn">Apply &amp; refresh</button>
+  </div>
+  <div class="status-line" id="globalStatusLine"></div>
+</div>
+
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="page-dashboard">Dashboard</button>
+  <button class="tab-btn" data-tab="page-teamtickets">Team tickets by individual</button>
+  <button class="tab-btn" data-tab="page-customereng">Customer Engineering</button>
+  <button class="tab-btn" data-tab="page-qateam">QA</button>
+  <button class="tab-btn" data-tab="page-infrateam">Infra</button>
+  <button class="tab-btn" data-tab="page-actionitems">Action items</button>
+  <button class="tab-btn" data-tab="page-rca">RCA Documents</button>
+  <button class="tab-btn" data-tab="page-settings">Settings</button>
+</div>
+
+<!-- ============================== DASHBOARD ============================== -->
+<div class="tab-page active" id="page-dashboard">
+
+  <div class="note" id="liveNtaRequiredNote" style="display:none">
+    Most of the Dashboard tab requires a Neutara Ticketing connection with at least one completed
+    sync (backlog counts, SLA health, per-person hygiene, reopened tickets). Configure it and click
+    Sync now under <b>Settings</b> to enable it.
+  </div>
+
+  <h2>1. Current open backlog <span id="backlogTeamLabel">(all teams, all time)</span></h2>
+  <p class="sub" id="excludedNote" style="margin-top:-6px"></p>
+  <div class="cards" id="backlogCards"><div class="empty-state">Configure Neutara Ticketing in Settings and sync, then Apply &amp; refresh.</div></div>
+
+  <h2>2. SLA health — by team, tickets created in range</h2>
+  <div class="cards" id="slaCards"><div class="empty-state">—</div></div>
+  <div class="cap-note" id="slaCapNote" style="display:none"></div>
+
+  <h2>3. Recent activity</h2>
+  <div class="cards" id="recentCards"><div class="empty-state">—</div></div>
+
+  <h2>4. Team overview (recent window, click a team to filter the table below)</h2>
+  <div class="team-cards" id="teamCards"><div class="empty-state">—</div></div>
+  <div class="cap-note" id="capNote" style="display:none"></div>
+
+  <h2>5. Per-person hygiene</h2>
+  <p class="sub" style="margin-top:-6px">Score starts at 100 and is docked for stale tickets, missing priority/labels/components/due date, overdue tickets, tickets resolved without a proper "Closed" status, and closed tickets with no image attachment on them.</p>
+  <div class="table-wrap">
+    <div class="table-toolbar">
+      <select id="teamFilterSel">
+        <option value="all">All teams</option>
+        <option value="ent">Migration - ENT</option>
+        <option value="smb">Migration - SMB</option>
+        <option value="eng">Customer Engineering</option>
+        <option value="qa">QA</option>
+        <option value="infra">Infra</option>
+        <option value="other">Unmapped / Other</option>
+      </select>
+      <input type="text" id="searchInput" placeholder="Search person by name or email…">
+      <button class="secondary" id="searchBtn">Search</button>
+      <button class="secondary" id="clearSearchBtn">Clear</button>
+    </div>
+    <div class="table-scroll">
+      <table id="personTable">
+        <thead>
+          <tr>
+            <th data-key="name">Assignee</th><th data-key="team">Team</th><th data-key="touched">Touched</th>
+            <th data-key="open">Open now</th><th data-key="stale">Stale</th><th data-key="missing">Missing details</th>
+            <th data-key="overdue">Overdue</th><th data-key="closed">Closed (window)</th>
+            <th data-key="noClosure">Resolved w/o closure</th><th data-key="screenshotPct">Screenshot compliance</th>
+            <th data-key="score" class="sorted">Hygiene score</th>
+          </tr>
+        </thead>
+        <tbody id="personBody"><tr><td colspan="11" class="empty-state">—</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2>6. Reopened tickets (all 5 teams)</h2>
+  <p class="sub" id="reopenedSub" style="margin-top:-6px">Every ticket reopened at least once within the date range above.</p>
+  <div class="table-toolbar" style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;">
+    <button class="secondary" id="refreshReopenedBtn">Refresh</button>
+    <span id="reopenedStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+  </div>
+  <div id="reopenedSection"><div class="empty-state">—</div></div>
+
+  <h2>7. This week's reports — Migration ENT / SMB / Customer Engineering</h2>
+  <p class="sub" style="margin-top:-6px" id="weeklyReportsRangeLabel">—</p>
+  <div class="table-toolbar" style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;">
+    <button class="secondary" id="refreshWeeklyBtn">Load last week's data</button>
+    <span id="weeklyStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+  </div>
+  <div id="weeklyReportsSection"></div>
+
+</div><!-- /#page-dashboard -->
+
+<!-- ============================== TEAM TICKETS ============================== -->
+<div class="tab-page" id="page-teamtickets">
+  <h2 id="teamTicketsHeading">Team tickets by individual</h2>
+  <p class="sub" style="margin-top:-6px">A ticket counts if it was <b>created OR updated</b> in the selected date range. One row per person. <b>Breached</b> splits into <b>Retry</b> (summary contains retry/conflict(s)/"not moving"/stuck/"not picking") and <b>Non-retry</b>.</p>
+  <div class="table-toolbar" style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;">
+    <button class="secondary" id="refreshTeamTicketsBtn">Refresh this tab's data</button>
+    <span id="teamTicketsStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+  </div>
+  <div id="teamTicketsSection"><div class="empty-state">Switch to this tab to load — or click "Refresh this tab's data".</div></div>
+</div>
+
+<!-- ============================== TEAM TABS (eng/qa/infra) ============================== -->
+<div class="tab-page" id="page-customereng"></div>
+<div class="tab-page" id="page-qateam"></div>
+<div class="tab-page" id="page-infrateam"></div>
+
+<!-- ============================== ACTION ITEMS ============================== -->
+<div class="tab-page" id="page-actionitems">
+  <h2>Action items</h2>
+  <p class="sub" style="margin-top:-6px">Tracked here, not pulled from Jira — mark each item's completion yourself; selections are saved in this browser and persist across reloads.</p>
+  <p class="sub" id="actionItemsSummary" style="margin-top:-6px;font-weight:600;"></p>
+
+  <h3 style="margin:16px 0 4px;">Action items</h3>
+  <div class="table-wrap">
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th style="width:48px;">S.No</th><th>Action Item</th><th>Accountable Person</th><th style="width:140px;">Completed?</th><th style="width:200px;">Jira tickets</th></tr></thead>
+        <tbody id="actionItemsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <h3 style="margin:20px 0 4px;">Permanent Fix Action Items</h3>
+  <div class="table-wrap">
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th style="width:100px;">Ticket ID</th><th>Action</th><th>Accountable Person</th><th style="width:140px;">Completed?</th><th style="width:200px;">Jira tickets</th></tr></thead>
+        <tbody id="permanentFixBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== RCA DOCUMENTS ============================== -->
+<div class="tab-page" id="page-rca">
+  <h2>RCA Documents</h2>
+  <p class="sub" style="margin-top:-6px">A repository of Root Cause Analysis write-ups, organized by migration manager and then by project — static content, not pulled from Jira.</p>
+  <div id="rcaDocsContainer"><div class="empty-state">No RCA documents added yet.</div></div>
+</div>
+
+<!-- ============================== SETTINGS ============================== -->
+<div class="tab-page" id="page-settings">
+  <h2>Neutara Ticketing connection</h2>
+  <p class="sub" style="margin-top:-6px">Credentials are stored server-side in <code>config.json</code> (never sent back to the browser in full, never logged). A full sync pulls the entire ticket history and takes several minutes — it runs automatically in the background (every few hours) and can also be triggered on demand below.</p>
+  <div class="panel" style="max-width:520px;">
+    <div class="field" style="margin-bottom:10px;">
+      <label>Neutara Ticketing API base URL</label>
+      <input type="text" id="ntaBaseUrl" placeholder="https://neutaraticketing.cftools.live/api" style="width:100%;">
+    </div>
+    <div class="field" style="margin-bottom:10px;">
+      <label>API key</label>
+      <input type="password" id="ntaApiKey" placeholder="Paste API key (leave blank to keep current)" style="width:100%;">
+      <span class="sub" id="ntaKeyMasked" style="margin:2px 0 0;"></span>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="primary" id="saveNtaBtn">Save</button>
+      <button class="secondary" id="testNtaBtn">Test connection</button>
+      <button class="secondary" id="syncNtaBtn">Sync now</button>
+    </div>
+    <div id="ntaConnStatus" style="margin-top:10px;font-size:13px;"></div>
+    <div id="ntaSyncStatus" style="margin-top:6px;font-size:13px;color:#6b7280;"></div>
+  </div>
+
+  <h2>Excel upload (Customer Engineering / QA / Infra file-backed tabs)</h2>
+  <p class="sub" style="margin-top:-6px">Expected columns: Issue Type, Key, Summary, Assignee, Reporter, Components, Combination, Priority, Status, Resolution, Created, Updated, Due date, First Response SLA Breach, Resolution SLA Breach. Key prefix decides the team: L2B/L3B → Customer Engineering, IN → Infra, QA → QA. CFITS rows are kept but not attributed to a team (see README — ENT vs SMB can't be split from this sheet alone).</p>
+  <div class="panel" style="max-width:640px;">
+    <input type="file" id="excelFileInput" accept=".xlsx,.xls,.xlsm">
+    <button class="secondary" id="uploadExcelBtn">Upload &amp; parse</button>
+    <div id="uploadStatus" style="margin-top:10px;font-size:13px;"></div>
+    <div id="uploadMeta" style="margin-top:10px;font-size:13px;"></div>
+  </div>
+
+  <h2>Per-section data source</h2>
+  <p class="sub" style="margin-top:-6px">Customer Engineering / QA / Infra and Team tickets by individual can each independently use Live Neutara Ticketing or your Uploaded Excel. Pick per tab using the toggle shown at the top of that tab.</p>
+</div>
+
+<script src="/shared/constants.js"></script>
+<script src="/shared/rules.js"></script>
+<script src="/shared/logic.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/util.js"></script>
+<script src="/js/settings.js"></script>
+<script src="/js/dashboard.js"></script>
+<script src="/js/teamtickets.js"></script>
+<script src="/js/teamtab.js"></script>
+<script src="/js/actionitems.js"></script>
+<script src="/js/rca.js"></script>
+<script src="/js/main.js"></script>
+</body>
+</html>
