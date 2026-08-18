@@ -22,7 +22,7 @@ npm install
 npm start
 ```
 
-Then open `http://localhost:3000` in your browser. The port can be overridden with the
+Then open `http://localhost:6100` in your browser. The port can be overridden with the
 `PORT` environment variable.
 
 ## Running with Docker
@@ -37,7 +37,7 @@ a container recreation/redeploy.
 docker compose up -d --build
 ```
 
-This builds the image, starts the container, maps port 3000 (override with `PORT=8080
+This builds the image, starts the container, maps port 6100 (override with `PORT=8080
 docker compose up -d`), and bind-mounts `./data` into the container so credentials and the
 synced dataset persist across restarts and redeploys. Verified end-to-end on this repo: the
 image builds, the container reports healthy, and a fresh container reusing an existing
@@ -49,7 +49,7 @@ re-entry needed.
 ```bash
 docker build -t ticket-hygiene-app .
 docker run -d --name ticket-hygiene-app \
-  -p 3000:3000 \
+  -p 6100:6100 \
   -v "$(pwd)/data:/app/data" \
   --restart unless-stopped \
   ticket-hygiene-app

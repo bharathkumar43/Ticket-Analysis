@@ -9,7 +9,7 @@ const ntaSync = require('./lib/ntaSync');
 const configStore = require('./lib/configStore');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 6100;
 
 // A full Neutara Ticketing sync pulls the entire ~29K-ticket history (no server-side
 // date/department filter is honored by the API), which takes several minutes — so it runs
