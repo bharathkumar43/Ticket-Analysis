@@ -60,11 +60,9 @@
 <div class="tab-bar">
   <button class="tab-btn active" data-tab="page-dashboard">Dashboard</button>
   <button class="tab-btn" data-tab="page-teamtickets">Team tickets by individual</button>
-  <button class="tab-btn" data-tab="page-customereng">Customer Engineering</button>
-  <button class="tab-btn" data-tab="page-qateam">QA</button>
-  <button class="tab-btn" data-tab="page-infrateam">Infra</button>
-  <button class="tab-btn" data-tab="page-actionitems">Action items</button>
+  <button class="tab-btn" data-tab="page-qateam">Leader Mertices</button>
   <button class="tab-btn" data-tab="page-rca">RCA Documents</button>
+  <button class="tab-btn" data-tab="page-shiftlead">Shift Lead</button>
   <button class="tab-btn" data-tab="page-settings">Settings</button>
 </div>
 
@@ -154,36 +152,16 @@
   <div id="teamTicketsSection"><div class="empty-state">Switch to this tab to load — or click "Refresh this tab's data".</div></div>
 </div>
 
-<!-- ============================== TEAM TABS (eng/qa/infra) ============================== -->
-<div class="tab-page" id="page-customereng"></div>
-<div class="tab-page" id="page-qateam"></div>
-<div class="tab-page" id="page-infrateam"></div>
-
-<!-- ============================== ACTION ITEMS ============================== -->
-<div class="tab-page" id="page-actionitems">
-  <h2>Action items</h2>
-  <p class="sub" style="margin-top:-6px">Tracked here, not pulled from Jira — mark each item's completion yourself; selections are saved in this browser and persist across reloads.</p>
-  <p class="sub" id="actionItemsSummary" style="margin-top:-6px;font-weight:600;"></p>
-
-  <h3 style="margin:16px 0 4px;">Action items</h3>
-  <div class="table-wrap">
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th style="width:48px;">S.No</th><th>Action Item</th><th>Accountable Person</th><th style="width:140px;">Completed?</th><th style="width:200px;">Jira tickets</th></tr></thead>
-        <tbody id="actionItemsBody"></tbody>
-      </table>
-    </div>
+<!-- ============================== LEADER MERTICES ============================== -->
+<div class="tab-page" id="page-qateam">
+  <div class="tab-bar" id="leaderMetricsTabBar">
+    <button class="tab-btn active" data-subtab="leader-ajay">Ajay</button>
+    <button class="tab-btn" data-subtab="leader-abhishek">Abhishek</button>
+    <button class="tab-btn" data-subtab="leader-ankit">Ankit</button>
   </div>
-
-  <h3 style="margin:20px 0 4px;">Permanent Fix Action Items</h3>
-  <div class="table-wrap">
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th style="width:100px;">Ticket ID</th><th>Action</th><th>Accountable Person</th><th style="width:140px;">Completed?</th><th style="width:200px;">Jira tickets</th></tr></thead>
-        <tbody id="permanentFixBody"></tbody>
-      </table>
-    </div>
-  </div>
+  <div class="tab-page active" id="leader-ajay"></div>
+  <div class="tab-page" id="leader-abhishek"></div>
+  <div class="tab-page" id="leader-ankit"></div>
 </div>
 
 <!-- ============================== RCA DOCUMENTS ============================== -->
@@ -191,6 +169,33 @@
   <h2>RCA Documents</h2>
   <p class="sub" style="margin-top:-6px">A repository of Root Cause Analysis write-ups, organized by migration manager and then by project — static content, not pulled from Jira.</p>
   <div id="rcaDocsContainer"><div class="empty-state">No RCA documents added yet.</div></div>
+</div>
+
+<!-- ============================== SHIFT LEAD ============================== -->
+<div class="tab-page" id="page-shiftlead">
+  <div class="kpi-summary-block" id="unassignedDevBlock">
+    <div class="kpi-block-header kpi-head-alert">
+      Unassigned Dev Tickets <span class="kpi-block-hint">Live check against the last Neutara Ticketing sync — no history/timestamp for when a ticket entered Dev, so this reflects the current snapshot only</span>
+    </div>
+    <div class="table-wrap">
+      <div class="table-toolbar" style="background:#fff;">
+        <button class="secondary" id="refreshUnassignedDevBtn">Refresh</button>
+        <span id="unassignedDevStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+      </div>
+      <div id="unassignedDevSection"><div class="empty-state">Click Refresh, or switch to this tab, to check.</div></div>
+    </div>
+  </div>
+
+  <div class="tab-bar" id="shiftLeadTabBar">
+    <button class="tab-btn active" data-subtab="shiftlead-abhinandan">Abhinandan Kumar</button>
+    <button class="tab-btn" data-subtab="shiftlead-ravi">Ravi Srivastava</button>
+    <button class="tab-btn" data-subtab="shiftlead-pragati">Pragati Pandey</button>
+    <button class="tab-btn" data-subtab="shiftlead-akhila">Akhila Aenkoju</button>
+  </div>
+  <div class="tab-page active" id="shiftlead-abhinandan"></div>
+  <div class="tab-page" id="shiftlead-ravi"></div>
+  <div class="tab-page" id="shiftlead-pragati"></div>
+  <div class="tab-page" id="shiftlead-akhila"></div>
 </div>
 
 <!-- ============================== SETTINGS ============================== -->
@@ -226,7 +231,7 @@
   </div>
 
   <h2>Per-section data source</h2>
-  <p class="sub" style="margin-top:-6px">Customer Engineering / QA / Infra and Team tickets by individual can each independently use Live Neutara Ticketing or your Uploaded Excel. Pick per tab using the toggle shown at the top of that tab.</p>
+  <p class="sub" style="margin-top:-6px">Team tickets by individual can use Live Neutara Ticketing or your Uploaded Excel. Pick using the toggle shown at the top of that tab.</p>
 </div>
 
 <script src="/shared/constants.js"></script>
@@ -237,8 +242,8 @@
 <script src="/js/settings.js"></script>
 <script src="/js/dashboard.js"></script>
 <script src="/js/teamtickets.js"></script>
-<script src="/js/teamtab.js"></script>
-<script src="/js/actionitems.js"></script>
+<script src="/js/leadermetrics.js"></script>
+<script src="/js/shiftlead.js"></script>
 <script src="/js/rca.js"></script>
 <script src="/js/main.js"></script>
 </body>

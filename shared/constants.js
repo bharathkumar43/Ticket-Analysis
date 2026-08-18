@@ -80,7 +80,6 @@
   // Source: lines 2405-2426 — Customer Engineering / QA / Infra "team tab" definitions.
   const TEAM_TAB_DEFS = {
     eng: { label: 'Customer Engineering', hasRcaFix: true },
-    qa: { label: 'QA', hasRcaFix: false },
     infra: { label: 'Infra', hasRcaFix: false },
   };
   const TEAM_TAB_CAP = 3000;

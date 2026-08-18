@@ -97,6 +97,97 @@ tbody tr:hover { background: #fafafa; }
 .num-link:hover { text-decoration: underline; }
 .trend-up { color: #15803d; font-weight: 600; }
 .trend-down { color: #b91c1c; font-weight: 600; }
+
+.kpi-range-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+  padding: 8px 14px; margin: 10px 0; font-size: 12.5px; color: #312e81;
+}
+.kpi-range-label { font-weight: 800; letter-spacing: .04em; font-size: 11px; }
+.kpi-range-dates { font-weight: 700; }
+.kpi-range-hint { color: #6366f1; margin-left: auto; font-size: 11.5px; }
+.kpi-range-bar input[type="date"] { font-size: 12px; padding: 4px 6px; }
+.kpi-range-bar button.secondary { font-size: 11.5px; padding: 4px 8px; }
+
+.kpi-targets-bar {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  background: #fde68a; border: 1px solid #f5c542; border-radius: 8px;
+  padding: 8px 14px; margin: 10px 0 18px; font-size: 12.5px; color: #78350f;
+}
+.kpi-targets-label { font-weight: 800; letter-spacing: .04em; font-size: 11px; margin-right: 4px; }
+.kpi-summary-block { margin-bottom: 22px; }
+.kpi-block-header {
+  color: #fff; font-weight: 700; font-size: 13px; padding: 8px 14px;
+  border-radius: 8px 8px 0 0; display: flex; align-items: baseline; gap: 10px;
+}
+.kpi-block-hint { font-weight: 400; font-size: 11px; opacity: .85; }
+.kpi-head-day { background: #d97706; }
+.kpi-head-night { background: #4338ca; }
+.kpi-head-both { background: #0e7490; }
+.kpi-head-alert { background: #b91c1c; }
+.kpi-summary-block .table-wrap { border-radius: 0 0 10px 10px; margin-top: 0; }
+table.kpi-table th, table.kpi-table td { text-align: center; white-space: nowrap; }
+table.kpi-table th:first-child, table.kpi-table td:first-child,
+table.kpi-table th:nth-child(2), table.kpi-table td:nth-child(2) { text-align: left; }
+table.kpi-table tfoot td { background: #eef2ff; font-weight: 700; }
+table.kpi-table td.good-cell { color: #15803d; font-weight: 700; }
+table.kpi-table td.bad-cell { color: #b91c1c; font-weight: 700; }
+table.kpi-daily-table input[type="number"] {
+  width: 64px; text-align: right; font-size: 13px; padding: 5px 6px;
+  border-radius: 6px; border: 1px solid #e7c65c; background: #fff9db;
+}
+table.kpi-daily-table input[type="number"]:focus { background: #fff; border-color: #4f46e5; outline: none; }
+table.kpi-daily-table tbody tr:nth-child(7n) td { border-bottom: 2px solid #d1d5db; }
+tr.kpi-today-row td { background: #eef2ff; }
+.kpi-today-tag { display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; background: #4f46e5; color: #fff; border-radius: 4px; padding: 1px 6px; margin-left: 4px; }
+
+
+.kpi-week-toggle {
+  width: 100%; text-align: left; display: flex; align-items: center; gap: 8px;
+  background: #f3f4f6; border: none; border-top: 1px solid #e5e7eb; padding: 10px 14px;
+  font-size: 13px; font-weight: 600; color: #374151; cursor: pointer;
+}
+.kpi-week-toggle:hover { background: #e5e7eb; }
+.kpi-week-toggle.open { background: #eef2ff; color: #312e81; }
+.kpi-week-caret { font-size: 11px; }
+.kpi-week-toggle-sub { margin-left: auto; font-size: 11px; font-weight: 400; color: #6b7280; }
+
+.kpi-add-project { background: #fff; border: 2px solid #4f46e5; border-radius: 12px; padding: 16px; margin-bottom: 22px; box-shadow: 0 2px 10px rgba(79,70,229,.08); }
+.kpi-add-project-title { font-weight: 700; font-size: 15px; margin-bottom: 12px; }
+.kpi-add-project-fields { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.kpi-add-project-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #6b7280; }
+.kpi-add-project-fields input[type="text"], .kpi-add-project-fields input[type="date"], .kpi-add-project-fields select {
+  font-size: 13px; padding: 7px 9px; border-radius: 7px; border: 1px solid #d1d5db;
+}
+.kpi-add-checkbox { flex-direction: row !important; align-items: center; gap: 6px !important; font-size: 12px !important; color: #374151 !important; }
+.kpi-day-group-row td { background: #f3f4f6; font-weight: 700; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; color: #6b7280; padding: 6px 10px; }
+.kpi-day-group-row.kpi-today-row td { background: #eef2ff; color: #4338ca; }
+.kpi-empty-day td { color: #9ca3af; font-style: italic; font-size: 12px; }
+.kpi-daily-table td.good-cell, .kpi-daily-table td.bad-cell { font-weight: 700; }
+
+.kpi-scorecard-block { margin-bottom: 20px; }
+.kpi-scorecard-head { font-weight: 700; font-size: 14px; margin-bottom: 10px; display: flex; align-items: baseline; gap: 8px; }
+.kpi-scorecard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.kpi-score-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; }
+.kpi-score-card.good-cell { border-color: #86efac; background: #f0fdf4; }
+.kpi-score-card.bad-cell { border-color: #fca5a5; background: #fef2f2; }
+.kpi-score-val { font-size: 22px; font-weight: 700; }
+.kpi-score-card.good-cell .kpi-score-val { color: #15803d; }
+.kpi-score-card.bad-cell .kpi-score-val { color: #b91c1c; }
+.kpi-score-lbl { font-size: 12px; color: #374151; margin-top: 2px; }
+.kpi-score-target { font-size: 10.5px; color: #9ca3af; margin-top: 3px; }
+
+.kpi-inner-tabs { margin: 4px 0 16px; }
+.kpi-inner-tab-body { min-height: 100px; }
+
+.kpi-details-toggle {
+  background: none; border: none; color: #4f46e5; font-size: 12.5px; font-weight: 600;
+  cursor: pointer; padding: 8px 0 0; text-align: left;
+}
+.kpi-details-toggle:hover { text-decoration: underline; }
+.kpi-add-project-details { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eef0f2; }
+.kpi-mark-all-good-btn { font-size: 11.5px; padding: 4px 10px; margin-bottom: 10px; }
+.kpi-add-project-checkboxes { display: flex; flex-wrap: wrap; gap: 10px 18px; }
 .trend-flat { color: #9ca3af; }
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(17,24,39,.55); z-index: 1000; align-items: center; justify-content: center; padding: 24px; }
 .modal-overlay.open { display: flex; }

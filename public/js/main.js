@@ -26,14 +26,8 @@ async function loadTabIfNeeded(tabId, force) {
     case 'page-teamtickets':
       await loadTeamTicketsSection();
       break;
-    case 'page-customereng':
-      await loadTeamTabSection('eng');
-      break;
-    case 'page-qateam':
-      await loadTeamTabSection('qa');
-      break;
-    case 'page-infrateam':
-      await loadTeamTabSection('infra');
+    case 'page-shiftlead':
+      await loadUnassignedDevSection();
       break;
     default:
       break;
@@ -43,14 +37,28 @@ async function loadTabIfNeeded(tabId, force) {
 document.addEventListener('DOMContentLoaded', () => {
   setDateInputs();
 
-  document.querySelectorAll('.tab-btn').forEach(btn => {
+  document.querySelectorAll('body > .tab-bar > .tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('body > .tab-bar > .tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('body > .tab-page').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       const page = document.getElementById(btn.dataset.tab);
       page.classList.add('active');
       loadTabIfNeeded(btn.dataset.tab, false);
+    });
+  });
+
+  [
+    { barId: 'leaderMetricsTabBar', pageId: 'page-qateam' },
+    { barId: 'shiftLeadTabBar', pageId: 'page-shiftlead' },
+  ].forEach(({ barId, pageId }) => {
+    document.querySelectorAll(`#${barId} > .tab-btn`).forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll(`#${barId} > .tab-btn`).forEach(b => b.classList.remove('active'));
+        document.querySelectorAll(`#${pageId} > .tab-page`).forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.subtab).classList.add('active');
+      });
     });
   });
 
@@ -72,9 +80,6 @@ document.addEventListener('DOMContentLoaded', () => {
       await loadReopenedSection(AppState.fromStr, AppState.toStr, toExclusive(AppState.toStr));
     } else if (activeTab === 'page-teamtickets') {
       await loadTeamTicketsSection();
-    } else if (C.TEAM_TAB_DEFS[activeTab.replace('page-customereng', 'eng').replace('page-qateam', 'qa').replace('page-infrateam', 'infra')]) {
-      const teamKey = activeTab === 'page-customereng' ? 'eng' : activeTab === 'page-qateam' ? 'qa' : 'infra';
-      await loadTeamTabSection(teamKey);
     }
   });
 
