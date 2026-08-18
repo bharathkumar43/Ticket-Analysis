@@ -175,12 +175,20 @@
   // issue shape (fields.status.category / fields.duedate / fields.attachment) rather than a
   // raw Jira issue — labels/components (Jira-only concepts) are no longer part of the
   // "missing metadata" check since neither NTA nor the Excel export carry them.
+  //
+  // Every count also retains the *tickets* behind it (touchedIssues/openIssues/staleIssues/
+  // missingIssues/overdueIssues/closedIssues/noClosureIssues/screenshotMissingIssues) so a
+  // UI can drill down from any number straight to its underlying tickets.
   function computeHygiene(openTouched, closedInWindow, staleDays) {
     const byPerson = {};
     function ensure(name, email) {
       const key = email || name;
       if (!byPerson[key]) {
-        byPerson[key] = { name, email, team: Rules.classify(email), touched: 0, open: 0, stale: 0, missing: 0, overdue: 0, closed: 0, noClosure: 0, screenshots: 0, closedWithAttachmentCheck: 0 };
+        byPerson[key] = {
+          name, email, team: Rules.classify(email),
+          touched: 0, open: 0, stale: 0, missing: 0, overdue: 0, closed: 0, noClosure: 0, screenshots: 0, closedWithAttachmentCheck: 0,
+          touchedIssues: [], openIssues: [], staleIssues: [], missingIssues: [], overdueIssues: [], closedIssues: [], noClosureIssues: [], screenshotMissingIssues: [],
+        };
       }
       return byPerson[key];
     }
@@ -191,13 +199,15 @@
       const email = f.assignee ? f.assignee.emailAddress : null;
       const p = ensure(name, email);
       p.touched++;
+      p.touchedIssues.push(issue);
       const isOpen = f.status && f.status.category !== 'done';
       if (isOpen) {
         p.open++;
-        if (!f.priority || !f.duedate) p.missing++;
-        if (f.duedate && new Date(f.duedate).getTime() < Date.now()) p.overdue++;
+        p.openIssues.push(issue);
+        if (!f.priority || !f.duedate) { p.missing++; p.missingIssues.push(issue); }
+        if (f.duedate && new Date(f.duedate).getTime() < Date.now()) { p.overdue++; p.overdueIssues.push(issue); }
         const upd = f.updated ? (Date.now() - new Date(f.updated).getTime()) / 86400000 : null;
-        if (upd !== null && upd > staleDays) p.stale++;
+        if (upd !== null && upd > staleDays) { p.stale++; p.staleIssues.push(issue); }
       }
     }
 
@@ -207,13 +217,16 @@
       const email = f.assignee ? f.assignee.emailAddress : null;
       const p = ensure(name, email);
       p.touched++;
+      p.touchedIssues.push(issue);
       p.closed++;
+      p.closedIssues.push(issue);
       p.closedWithAttachmentCheck++;
       const statusName = (f.status && f.status.name) || '';
-      if (!/^closed$/i.test(statusName) && !/^done$/i.test(statusName)) p.noClosure++;
+      if (!/^closed$/i.test(statusName) && !/^done$/i.test(statusName)) { p.noClosure++; p.noClosureIssues.push(issue); }
       const atts = f.attachment || [];
       const hasImage = atts.some(a => C.IMAGE_TYPES.includes((a.mimeType || '').toLowerCase()));
       if (hasImage) p.screenshots++;
+      else p.screenshotMissingIssues.push(issue);
     }
 
     const rows = Object.values(byPerson).map(p => {

@@ -3,11 +3,16 @@
 // pseudo-issue shape (see lib/ntaMapper.js / lib/excelParser.js), filtered per team via
 // Logic.getFileTicketsForTeam and bucketed per person below — one code path for both
 // sources (CFITS/ENT/SMB rows aren't in the Excel dataset — see README — so those two teams
-// show a note instead of a table when Excel is selected).
+// show a note instead of a table when Excel is selected). Every number in the table is
+// clickable and opens the tickets behind it.
 let teamTicketsSource = 'live';
+let lastPerTeam = null;
 
 function newPersonBucket(key, label) {
-  return { key, label, total: 0, open: 0, breached: 0, breachedRetry: 0, breachedNonRetry: 0, resolvedInTime: 0, resTimesMs: [] };
+  return {
+    key, label, total: 0, open: 0, breached: 0, breachedRetry: 0, breachedNonRetry: 0, resolvedInTime: 0, resTimesMs: [],
+    totalIssues: [], openIssues: [], breachedIssues: [], breachedRetryIssues: [], breachedNonRetryIssues: [], resolvedInTimeIssues: [],
+  };
 }
 
 async function loadTeamTicketsSection() {
@@ -34,28 +39,30 @@ async function loadTeamTicketsSection() {
       continue;
     }
     const items = Logic.getFileTicketsForTeam(data.issues, teamKey, fromStr, toExclusiveStr);
-    perTeam[teamKey] = buildPerTeamFromTickets(teamKey, items.map(Logic.classifyFileTicket));
+    perTeam[teamKey] = buildPerTeamFromIssues(teamKey, items);
   }
+  lastPerTeam = perTeam;
   statusEl.textContent = 'Updated ' + new Date().toLocaleString();
   renderTeamTicketsSection(perTeam);
 }
 
-function buildPerTeamFromTickets(teamKey, tickets) {
+function buildPerTeamFromIssues(teamKey, issues) {
   const byPerson = {};
   const roster = C.TEAMS[teamKey].map(e => e.toLowerCase());
-  tickets.forEach(t => {
+  issues.forEach(issue => {
+    const t = Logic.classifyFileTicket(issue);
     if (!t.assigneeEmail || !roster.includes(t.assigneeEmail)) return;
     if (!byPerson[t.assigneeEmail]) byPerson[t.assigneeEmail] = newPersonBucket(t.assigneeEmail, t.assignee);
     const p = byPerson[t.assigneeEmail];
-    p.total++;
-    if (!t.isClosed) p.open++;
+    p.total++; p.totalIssues.push(issue);
+    if (!t.isClosed) { p.open++; p.openIssues.push(issue); }
     if (t.slaBreached === true) {
-      p.breached++;
-      if (Rules.retryMatch(t.summary)) p.breachedRetry++; else p.breachedNonRetry++;
+      p.breached++; p.breachedIssues.push(issue);
+      if (Rules.retryMatch(t.summary)) { p.breachedRetry++; p.breachedRetryIssues.push(issue); } else { p.breachedNonRetry++; p.breachedNonRetryIssues.push(issue); }
     }
     if (t.isClosed) {
       if (t.created && t.resolutiondate) p.resTimesMs.push(new Date(t.resolutiondate).getTime() - new Date(t.created).getTime());
-      if (t.slaBreached === false) p.resolvedInTime++;
+      if (t.slaBreached === false) { p.resolvedInTime++; p.resolvedInTimeIssues.push(issue); }
     }
   });
   roster.forEach(email => { if (!byPerson[email]) byPerson[email] = newPersonBucket(email, Logic.emailToName(email)); });
@@ -90,9 +97,10 @@ function renderTeamTicketsSection(perTeam) {
       return;
     }
     const avgDays = ms => ms.length ? (ms.reduce((a, b) => a + b, 0) / ms.length / 86400000) : null;
-    const rowsHtml = people.map(p => `<tr>
-      <td>${escapeHtml(p.label)}</td><td>${fmt(p.total)}</td><td>${fmt(p.open)}</td><td>${fmt(p.breached)}</td>
-      <td>${fmt(p.breachedRetry)}</td><td>${fmt(p.breachedNonRetry)}</td><td>${fmt(p.resolvedInTime)}</td>
+    const numTd = (val, personIdx, field) => `<td class="num-link" data-team="${teamKey}" data-idx="${personIdx}" data-field="${field}">${fmt(val)}</td>`;
+    const rowsHtml = people.map((p, idx) => `<tr>
+      <td>${escapeHtml(p.label)}</td>${numTd(p.total, idx, 'totalIssues')}${numTd(p.open, idx, 'openIssues')}${numTd(p.breached, idx, 'breachedIssues')}
+      ${numTd(p.breachedRetry, idx, 'breachedRetryIssues')}${numTd(p.breachedNonRetry, idx, 'breachedNonRetryIssues')}${numTd(p.resolvedInTime, idx, 'resolvedInTimeIssues')}
       <td>${avgDays(p.resTimesMs) === null ? '—' : avgDays(p.resTimesMs).toFixed(1) + 'd'}</td></tr>`).join('');
     const totals = people.reduce((acc, p) => {
       acc.total += p.total; acc.open += p.open; acc.breached += p.breached; acc.breachedRetry += p.breachedRetry;
@@ -107,6 +115,18 @@ function renderTeamTicketsSection(perTeam) {
       </tr></thead><tbody>${rowsHtml}</tbody><tfoot>${footHtml}</tfoot></table>`;
     wrap.appendChild(scrollWrap);
     container.appendChild(wrap);
+  });
+
+  const fieldLabels = {
+    totalIssues: 'Total', openIssues: 'Open', breachedIssues: 'Breached',
+    breachedRetryIssues: 'Breached — Retry', breachedNonRetryIssues: 'Breached — Non-retry', resolvedInTimeIssues: 'Resolved in time',
+  };
+  container.querySelectorAll('td.num-link').forEach(td => {
+    td.addEventListener('click', () => {
+      const p = lastPerTeam[td.dataset.team].people[Number(td.dataset.idx)];
+      const field = td.dataset.field;
+      showFilteredDetail(`${p.label} — ${fieldLabels[field]}`, p[field], () => true);
+    });
   });
 }
 

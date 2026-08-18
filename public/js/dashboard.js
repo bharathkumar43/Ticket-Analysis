@@ -67,7 +67,7 @@ function loadSla(allIssues, fromStr, toExclusiveStr) {
     const tracked = inRange.filter(i => i.rb !== null);
     const breached = tracked.filter(i => i.rb === true);
     card(el, tracked.length ? breached.length : null, `${C.TEAM_LABELS[teamKey]} — Resolution SLA breached (of ${tracked.length} tracked / ${inRange.length})`, breached.length ? 'bad' : 'good', false,
-      breached.length ? () => showFilteredDetail(`${C.TEAM_LABELS[teamKey]} — SLA breached`, breached, () => true) : undefined);
+      () => showFilteredDetail(`${C.TEAM_LABELS[teamKey]} — SLA breached`, breached, () => true));
   });
 }
 
@@ -125,15 +125,24 @@ function renderTeamCards() {
     const shotPct = totalShotChecks > 0 ? Math.round((totalShots / totalShotChecks) * 100) : null;
     const div = document.createElement('div');
     div.className = 'team-card' + (currentTableTeam === key ? ' active' : '');
+    const flat = (field) => members.flatMap(m => m[field]);
     div.innerHTML = `
       <div class="tgroup">${key === 'ent' || key === 'smb' ? 'Migration' : ''}</div>
       <div class="tname">${C.TEAM_LABELS[key]}</div>
       <div class="trow"><span>Active people</span><span>${members.length}</span></div>
-      <div class="trow"><span>Open tickets</span><span>${totalOpen}</span></div>
-      <div class="trow"><span>Stale</span><span>${totalStale}</span></div>
-      <div class="trow"><span>Closed (window)</span><span>${totalClosed}</span></div>
-      <div class="trow"><span>Screenshot compliance</span><span>${shotPct === null ? '—' : shotPct + '%'}</span></div>
+      <div class="trow"><span>Open tickets</span><span class="num-link" data-field="openIssues">${totalOpen}</span></div>
+      <div class="trow"><span>Stale</span><span class="num-link" data-field="staleIssues">${totalStale}</span></div>
+      <div class="trow"><span>Closed (window)</span><span class="num-link" data-field="closedIssues">${totalClosed}</span></div>
+      <div class="trow"><span>Screenshot compliance</span><span class="num-link" data-field="screenshotMissingIssues">${shotPct === null ? '—' : shotPct + '%'}</span></div>
       <div class="tscore">${avgScore === null ? '—' : avgScore}</div>`;
+    const labels = { openIssues: 'Open tickets', staleIssues: 'Stale tickets', closedIssues: 'Closed (window)', screenshotMissingIssues: 'Closed with no screenshot' };
+    div.querySelectorAll('.num-link').forEach(elm => {
+      elm.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const field = elm.dataset.field;
+        showFilteredDetail(`${C.TEAM_LABELS[key]} — ${labels[field]}`, flat(field), () => true);
+      });
+    });
     div.addEventListener('click', () => {
       currentTableTeam = key;
       document.getElementById('teamFilterSel').value = key;
@@ -162,16 +171,29 @@ function renderPersonTable() {
     const an = (av === null ? -1 : av), bn = (bv === null ? -1 : bv);
     return sortAsc ? an - bn : bn - an;
   });
-  tbody.innerHTML = sorted.map(r => {
+  tbody.innerHTML = sorted.map((r, idx) => {
     const [cls, label] = gradeFor(r.score);
+    const num = (val, field) => `<td class="num-link" data-row="${idx}" data-field="${field}">${val}</td>`;
     return `<tr>
       <td>${escapeHtml(r.name)}${r.email ? '<br><span style="color:#9ca3af;font-size:11px">' + escapeHtml(r.email) + '</span>' : ''}</td>
       <td><span class="teamtag">${C.TEAM_LABELS[r.team]}</span></td>
-      <td>${r.touched}</td><td>${r.open}</td><td>${r.stale}</td><td>${r.missing}</td><td>${r.overdue}</td>
-      <td>${r.closed}</td><td>${r.noClosure}</td><td>${r.screenshotPct === null ? '—' : r.screenshotPct + '%'}</td>
+      ${num(r.touched, 'touchedIssues')}${num(r.open, 'openIssues')}${num(r.stale, 'staleIssues')}${num(r.missing, 'missingIssues')}${num(r.overdue, 'overdueIssues')}
+      ${num(r.closed, 'closedIssues')}${num(r.noClosure, 'noClosureIssues')}${num(r.screenshotPct === null ? '—' : r.screenshotPct + '%', 'screenshotMissingIssues')}
       <td><span class="grade ${cls}">${r.score} · ${label}</span></td>
     </tr>`;
   }).join('');
+
+  const colLabels = {
+    touchedIssues: 'Touched', openIssues: 'Open now', staleIssues: 'Stale', missingIssues: 'Missing details',
+    overdueIssues: 'Overdue', closedIssues: 'Closed (window)', noClosureIssues: 'Resolved w/o closure', screenshotMissingIssues: 'Closed with no screenshot',
+  };
+  tbody.querySelectorAll('td.num-link').forEach(td => {
+    td.addEventListener('click', () => {
+      const r = sorted[Number(td.dataset.row)];
+      const field = td.dataset.field;
+      showFilteredDetail(`${r.name} — ${colLabels[field]}`, r[field], () => true);
+    });
+  });
 }
 
 async function loadReopenedSection(fromStr, toStr, toExclusiveStr) {

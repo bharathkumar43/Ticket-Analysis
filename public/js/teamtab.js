@@ -3,13 +3,22 @@
 // between Live Neutara Ticketing (full feature set, including RCA/Fix Description — native
 // fields, available to any team, not just Customer Engineering) and Uploaded Excel (the
 // old Jira export's First Response/Resolution SLA breach flags only — no
-// description/attachment/RCA/Fix Description/reopened-ticket data).
+// description/attachment/RCA/Fix Description/reopened-ticket data). Every count shown
+// (cards and table cells alike) is clickable and opens the tickets behind it.
 
 const TEAM_TAB_PAGE_IDS = { eng: 'page-customereng', qa: 'page-qateam', infra: 'page-infrateam' };
 const TEAM_TAB_STATE = {};
 Object.keys(C.TEAM_TAB_DEFS).forEach(teamKey => {
   TEAM_TAB_STATE[teamKey] = { loaded: false, source: 'live', tickets: [], issues: [], selectedPerson: 'all', summaryMonthIdx: 0 };
 });
+
+// state.tickets and state.issues are built from the same array in the same order (see
+// loadTeamTabSection), so any filtered subset of `tickets` can be mapped back to its raw
+// pseudo-issues (needed by the drill-down modal, which reads issue.fields) via ticket key.
+function issuesForTickets(state, tickets) {
+  const byKey = new Map(state.issues.map(i => [i.key, i]));
+  return tickets.map(t => byKey.get(t.key)).filter(Boolean);
+}
 
 function buildTeamTabSkeleton(teamKey) {
   const def = C.TEAM_TAB_DEFS[teamKey];
@@ -27,6 +36,7 @@ function buildTeamTabSkeleton(teamKey) {
     <h3 style="margin:16px 0 4px;">Monthly summary</h3>
     <div id="${teamKey}Monthly"><div class="empty-state">Switch to this tab to load.</div></div>
     <h3 style="margin:20px 0 4px;">Per-person SLA summary</h3>
+    <p class="sub" style="margin-top:-6px">Trend arrows compare the shown month to the one before it (e.g. selecting August shows the change vs. July).</p>
     <div id="${teamKey}Summary"></div>
     <h3 style="margin:20px 0 4px;">Summary</h3>
     <div class="cards" id="${teamKey}Cards"></div>
@@ -122,12 +132,27 @@ function renderTeamTabMonthly(teamKey) {
     container.appendChild(heading);
     const row = document.createElement('div');
     row.className = 'cards';
-    card(row, inBucket.length, `Total tickets — ${bucket.label}`);
-    card(row, resolvedInTime.length, `Resolved tickets — ${bucket.label}`, resolutionPct !== null && resolutionPct < 70 ? 'warn' : 'good', false, undefined, resolutionPct === null ? '' : `${resolutionPct.toFixed(1)}%`);
-    card(row, breached.length, `Resolution SLA breached — ${bucket.label}`, breached.length ? 'bad' : 'good');
-    card(row, breachRate === null ? null : `${breachRate.toFixed(1)}%`, `Breach rate — ${bucket.label}`, breachRate ? 'bad' : 'good');
+    card(row, inBucket.length, `Total tickets — ${bucket.label}`, '', false, () => showFilteredDetail(`Total tickets — ${bucket.label}`, issuesForTickets(state, inBucket), () => true));
+    card(row, resolvedInTime.length, `Resolved tickets — ${bucket.label}`, resolutionPct !== null && resolutionPct < 70 ? 'warn' : 'good', false,
+      () => showFilteredDetail(`Resolved tickets — ${bucket.label}`, issuesForTickets(state, resolvedInTime), () => true), resolutionPct === null ? '' : `${resolutionPct.toFixed(1)}%`);
+    card(row, breached.length, `Resolution SLA breached — ${bucket.label}`, breached.length ? 'bad' : 'good', false,
+      () => showFilteredDetail(`Resolution SLA breached — ${bucket.label}`, issuesForTickets(state, breached), () => true));
+    card(row, breachRate === null ? null : `${breachRate.toFixed(1)}%`, `Breach rate — ${bucket.label}`, breachRate ? 'bad' : 'good', false,
+      () => showFilteredDetail(`Breach rate — ${bucket.label}`, issuesForTickets(state, breached), () => true));
     container.appendChild(row);
   });
+}
+
+// A small ▲/▼ badge comparing a month's value to the previous month's for the same person.
+// null means "not enough data" (either value untracked) — rendered as a flat dash, not 0%.
+function trendBadge(curr, prev, suffix) {
+  if (curr === null || curr === undefined) return '';
+  if (prev === null || prev === undefined) return '<span class="trend-flat">– n/a last month</span>';
+  const delta = curr - prev;
+  if (Math.abs(delta) < 0.5) return '<span class="trend-flat">– flat</span>';
+  const cls = delta > 0 ? 'trend-up' : 'trend-down';
+  const arrow = delta > 0 ? '▲' : '▼';
+  return `<span class="${cls}">${arrow} ${Math.abs(delta).toFixed(1)}${suffix} vs. last month</span>`;
 }
 
 function renderTeamTabPersonSummary(teamKey) {
@@ -137,22 +162,28 @@ function renderTeamTabPersonSummary(teamKey) {
   const buckets = Logic.monthBuckets(AppState.fromStr, AppState.toStr);
   if (!buckets.length) { container.innerHTML = '<div class="empty-state">No months in range.</div>'; return; }
   if (!(state.summaryMonthIdx >= 0 && state.summaryMonthIdx < buckets.length)) state.summaryMonthIdx = 0;
+  const showHygiene = state.source === 'live'; // hygiene-check fields aren't meaningful for Excel-sourced tickets
 
   const monthly = buckets.map(bucket => {
     const stats = {};
-    roster.forEach(email => { stats[email] = { email, name: Logic.emailToName(email), total: 0, resolvedSameMonth: 0, resBreached: 0, hoursSum: 0, hoursCount: 0 }; });
+    roster.forEach(email => { stats[email] = { email, name: Logic.emailToName(email), total: 0, resolvedSameMonth: 0, resBreached: 0, hoursSum: 0, hoursCount: 0, tickets: [], resolvedTickets: [], breachedTickets: [] }; });
     state.tickets.forEach(t => {
       if (!t.created || t.created < bucket.fromStr || t.created >= bucket.toExclusiveStr) return;
       const p = stats[t.assigneeEmail];
       if (!p) return;
       p.total++;
-      if (t.slaBreached) p.resBreached++;
+      p.tickets.push(t);
+      if (t.slaBreached) { p.resBreached++; p.breachedTickets.push(t); }
       const resEnd = t.resolutiondate || (t.isClosed ? t.updated : null);
       if (resEnd) {
-        if (resEnd >= bucket.fromStr && resEnd < bucket.toExclusiveStr) p.resolvedSameMonth++;
+        if (resEnd >= bucket.fromStr && resEnd < bucket.toExclusiveStr) { p.resolvedSameMonth++; p.resolvedTickets.push(t); }
         const hrs = (new Date(resEnd).getTime() - new Date(t.created).getTime()) / 3600000;
         if (isFinite(hrs) && hrs >= 0) { p.hoursSum += hrs; p.hoursCount++; }
       }
+    });
+    Object.values(stats).forEach(p => {
+      p.resolvedPct = p.total ? (p.resolvedSameMonth / p.total * 100) : null;
+      p.hygieneScore = showHygiene && p.tickets.length ? Logic.computePersonFactorScores({ team: teamKey, tickets: p.tickets }).overallScore100 : null;
     });
     return { bucket, stats };
   });
@@ -160,17 +191,26 @@ function renderTeamTabPersonSummary(teamKey) {
   const tabsHtml = '<div class="month-tabs">' + monthly.map(({ bucket }, idx) =>
     `<button type="button" class="month-tab-btn${idx === state.summaryMonthIdx ? ' active' : ''}" data-idx="${idx}">${escapeHtml(bucket.label)}</button>`).join('') + '</div>';
   const panelsHtml = monthly.map(({ bucket, stats }, idx) => {
+    const prevStats = idx > 0 ? monthly[idx - 1].stats : null;
     const rows = roster.map(e => stats[e]).sort((a, b) => a.name.localeCompare(b.name));
     const rowsHtml = rows.map(r => {
       const avgHrs = r.hoursCount ? (r.hoursSum / r.hoursCount) : null;
-      const pct = r.total ? (r.resolvedSameMonth / r.total * 100) : null;
-      return `<tr><td>${escapeHtml(r.name)}</td><td class="tts-num">${r.total}</td>
-        <td class="tts-num">${r.resolvedSameMonth}${pct === null ? '' : `<div class="sub" style="font-size:11px;margin-top:2px;">${pct.toFixed(1)}%</div>`}</td>
-        <td class="tts-num">${r.resBreached}</td><td class="tts-num">${avgHrs === null ? '—' : avgHrs.toFixed(1)}</td></tr>`;
+      const prev = prevStats ? prevStats[r.email] : null;
+      const resolvedTrend = trendBadge(r.resolvedPct, prev ? prev.resolvedPct : null, '%');
+      const hygieneTrend = showHygiene ? trendBadge(r.hygieneScore, prev ? prev.hygieneScore : null, ' pts') : '';
+      return `<tr>
+        <td>${escapeHtml(r.name)}</td>
+        <td class="tts-num num-link" data-idx="${idx}" data-email="${escapeHtml(r.email)}" data-field="tickets">${r.total}</td>
+        <td class="tts-num num-link" data-idx="${idx}" data-email="${escapeHtml(r.email)}" data-field="resolvedTickets">${r.resolvedSameMonth}${r.resolvedPct === null ? '' : `<div class="sub" style="font-size:11px;margin-top:2px;">${r.resolvedPct.toFixed(1)}%</div>`}
+          <div style="font-size:11px;margin-top:2px;">${resolvedTrend}</div></td>
+        ${showHygiene ? `<td class="tts-num">${r.hygieneScore === null ? '—' : r.hygieneScore}<div style="font-size:11px;margin-top:2px;">${hygieneTrend}</div></td>` : ''}
+        <td class="tts-num num-link" data-idx="${idx}" data-email="${escapeHtml(r.email)}" data-field="breachedTickets">${r.resBreached}</td>
+        <td class="tts-num">${avgHrs === null ? '—' : avgHrs.toFixed(1)}</td>
+      </tr>`;
     }).join('');
     return `<div class="month-tab-panel${idx === state.summaryMonthIdx ? ' active' : ''}" data-panel-idx="${idx}">
       <div class="table-wrap"><div class="table-scroll"><table class="person-tickets-table">
-        <thead><tr><th>Name</th><th>Total tickets</th><th>Resolved tickets</th><th>Resolution SLA breached</th><th>Avg. resolution (hours)</th></tr></thead>
+        <thead><tr><th>Name</th><th>Total tickets</th><th>Resolved tickets</th>${showHygiene ? '<th>Hygiene score</th>' : ''}<th>Resolution SLA breached</th><th>Avg. resolution (hours)</th></tr></thead>
         <tbody>${rowsHtml}</tbody></table></div></div></div>`;
   }).join('');
   container.innerHTML = tabsHtml + panelsHtml;
@@ -180,6 +220,14 @@ function renderTeamTabPersonSummary(teamKey) {
       state.summaryMonthIdx = idx;
       container.querySelectorAll('.month-tab-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.idx) === idx));
       container.querySelectorAll('.month-tab-panel').forEach(p => p.classList.toggle('active', Number(p.dataset.panelIdx) === idx));
+    });
+  });
+  container.querySelectorAll('td.num-link').forEach(td => {
+    td.addEventListener('click', () => {
+      const idx = Number(td.dataset.idx);
+      const p = monthly[idx].stats[td.dataset.email];
+      const tickets = p[td.dataset.field];
+      showFilteredDetail(`${p.name} — ${monthly[idx].bucket.label}`, issuesForTickets(state, tickets), () => true);
     });
   });
 }
@@ -197,12 +245,14 @@ function renderTeamTabTable(teamKey) {
     tbody.innerHTML = `<tr><td colspan="9" class="empty-state">No tickets for ${escapeHtml(personLabel)} in this date range.</td></tr>`;
     return;
   }
-  const resInTime = tickets.filter(t => t.slaBreached === false).length;
-  const resBreached = tickets.filter(t => t.slaBreached === true).length;
-  const resTracked = resInTime + resBreached;
-  card(cardsEl, tickets.length, `Total tickets — ${personLabel}`);
-  card(cardsEl, resTracked ? resInTime : null, `Resolved within SLA (of ${resTracked} tracked)`, resTracked && (resInTime / resTracked) < 0.7 ? 'warn' : 'good');
-  card(cardsEl, resTracked ? resBreached : null, `Resolution SLA breached (of ${resTracked} tracked)`, resBreached ? 'bad' : 'good');
+  const resInTimeTickets = tickets.filter(t => t.slaBreached === false);
+  const resBreachedTickets = tickets.filter(t => t.slaBreached === true);
+  const resTracked = resInTimeTickets.length + resBreachedTickets.length;
+  card(cardsEl, tickets.length, `Total tickets — ${personLabel}`, '', false, () => showFilteredDetail(`Total tickets — ${personLabel}`, issuesForTickets(state, tickets), () => true));
+  card(cardsEl, resTracked ? resInTimeTickets.length : null, `Resolved within SLA (of ${resTracked} tracked)`, resTracked && (resInTimeTickets.length / resTracked) < 0.7 ? 'warn' : 'good', false,
+    () => showFilteredDetail(`Resolved within SLA — ${personLabel}`, issuesForTickets(state, resInTimeTickets), () => true));
+  card(cardsEl, resTracked ? resBreachedTickets.length : null, `Resolution SLA breached (of ${resTracked} tracked)`, resBreachedTickets.length ? 'bad' : 'good', false,
+    () => showFilteredDetail(`Resolution SLA breached — ${personLabel}`, issuesForTickets(state, resBreachedTickets), () => true));
 
   const yn = (v) => v === null ? '<span style="color:#9ca3af">N/A</span>' : v ? '<span style="color:#b91c1c">Yes</span>' : '<span style="color:#15803d">No</span>';
   tbody.innerHTML = tickets.map(t => `<tr>
