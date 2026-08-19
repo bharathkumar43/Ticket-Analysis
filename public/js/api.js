@@ -68,6 +68,23 @@ const Api = (function () {
     return asJson(res);
   }
 
+  // Single live issue straight from Neutara, including its populated `activity` array
+  // (department/assignee/status/comment/sla change events) — not present in the bulk sync.
+  async function getNtaIssue(key) {
+    const res = await fetch(`/api/nta/issue/${encodeURIComponent(key)}`);
+    if (res.status === 404) return null;
+    return asJson(res);
+  }
+
+  // Batch version of getNtaIssue — returns { issues: { [key]: issue|null } }.
+  async function getNtaIssuesBulk(keys) {
+    const res = await fetch('/api/nta/issues-bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys }),
+    });
+    return asJson(res);
+  }
+
   async function getConfig() {
     const res = await fetch('/api/config');
     return asJson(res);
@@ -96,6 +113,6 @@ const Api = (function () {
   return {
     getConfig, saveConfig, uploadExcel, getCurrentData,
     ntaSearch, ntaCount, ntaTestConnection, getNtaSpaces, getNtaUsers, getNtaStats,
-    getNtaCurrent, syncNta, getNtaSyncStatus,
+    getNtaCurrent, syncNta, getNtaSyncStatus, getNtaIssue, getNtaIssuesBulk,
   };
 })();

@@ -244,7 +244,7 @@ function renderReopenedSection(perTeam) {
       const f = issue.fields;
       const assignee = f.assignee ? escapeHtml(f.assignee.displayName) : '<span style="color:#9ca3af">Unassigned</span>';
       const statusName = (f.status && f.status.name) || '';
-      return `<tr><td><a class="ticket-link" href="${browseUrl(issue.key)}" target="_blank" rel="noopener">${issue.key}</a></td>
+      return `<tr><td><a class="ticket-link" href="${browseUrl(issue.cfKey || issue.key)}" target="_blank" rel="noopener">${issue.cfKey || issue.key}</a></td>
         <td>${escapeHtml(f.summary || '')}</td><td>${escapeHtml(statusName)}</td><td>${assignee}</td>
         <td>${f.created ? new Date(f.created).toLocaleDateString() : '—'}</td>
         <td>${f.updated ? new Date(f.updated).toLocaleDateString() : '—'}</td></tr>`;

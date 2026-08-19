@@ -175,15 +175,26 @@
 <div class="tab-page" id="page-shiftlead">
   <div class="kpi-summary-block" id="unassignedDevBlock">
     <div class="kpi-block-header kpi-head-alert">
-      Unassigned Dev Tickets <span class="kpi-block-hint">Live check against the last Neutara Ticketing sync — no history/timestamp for when a ticket entered Dev, so this reflects the current snapshot only</span>
+      Dev Board Tickets <span class="kpi-block-hint">Live check against the last Neutara Ticketing sync — Neutara has no per-ticket change history yet (confirmed empty on every ticket checked), so this reflects the current snapshot only, filtered to tickets created OR resolved on the date below (includes closed tickets). Unassigned tickets are flagged in red.</span>
     </div>
     <div class="table-wrap">
       <div class="table-toolbar" style="background:#fff;">
+        <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;">Created on
+          <input type="date" id="unassignedDevDateInput">
+        </label>
+        <button class="secondary" id="unassignedDevAllTimeBtn">All time</button>
         <button class="secondary" id="refreshUnassignedDevBtn">Refresh</button>
         <span id="unassignedDevStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
       </div>
       <div id="unassignedDevSection"><div class="empty-state">Click Refresh, or switch to this tab, to check.</div></div>
     </div>
+  </div>
+
+  <div class="kpi-summary-block" id="shiftLeadComparisonBlock">
+    <div class="kpi-block-header kpi-head-both">
+      Shift Leads Compared <span class="kpi-block-hint">Assignment performance across all 4 shift leads, from the shared assignment log below</span>
+    </div>
+    <div id="shiftLeadComparisonSection"><div class="empty-state">No assignments logged yet.</div></div>
   </div>
 
   <div class="tab-bar" id="shiftLeadTabBar">

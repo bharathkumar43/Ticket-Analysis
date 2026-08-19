@@ -36,12 +36,12 @@ function openDetailModal(title, sub) {
 }
 function closeDetailModal() { document.getElementById('detailModalOverlay').classList.remove('open'); }
 
-// Best-effort guess at Neutara Ticketing's web UI ticket-detail route — not confirmed
-// against the live app, so treat this as a placeholder to correct once the real route is
-// known (see README).
-function browseUrl(key) {
+// Neutara Ticketing's web UI ticket-detail route, confirmed live: e.g.
+// https://neutaraticketing.cftools.live/issues/CF-29563 — keyed by cfKey, not the
+// board-specific `key`.
+function browseUrl(cfKey) {
   const base = (AppState.ntaBaseUrl || '').replace(/\/api\/?$/, '').replace(/\/+$/, '');
-  return base ? `${base}/tickets/${key}` : '#';
+  return base && cfKey ? `${base}/issues/${cfKey}` : '#';
 }
 
 function renderIssueListModal(title, issues) {
@@ -57,7 +57,7 @@ function renderIssueListModal(title, issues) {
     const createdStr = f.created ? new Date(f.created).toLocaleDateString() : '—';
     const resolvedStr = f.resolutiondate ? new Date(f.resolutiondate).toLocaleDateString() : '—';
     return `<tr>
-      <td><a class="ticket-link" href="${browseUrl(issue.key)}" target="_blank" rel="noopener">${issue.key}</a></td>
+      <td><a class="ticket-link" href="${browseUrl(issue.cfKey || issue.key)}" target="_blank" rel="noopener">${issue.cfKey || issue.key}</a></td>
       <td>${escapeHtml(f.summary || '')}</td>
       <td>${escapeHtml((f.status && f.status.name) || '')}</td>
       <td>${assignee}</td>

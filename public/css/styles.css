@@ -126,6 +126,8 @@ tbody tr:hover { background: #fafafa; }
 .kpi-head-both { background: #0e7490; }
 .kpi-head-alert { background: #b91c1c; }
 .kpi-summary-block .table-wrap { border-radius: 0 0 10px 10px; margin-top: 0; }
+tr.dev-row-unassigned td { background: #fef2f2; }
+tr.dev-row-assigned td { background: #f0fdf4; }
 table.kpi-table th, table.kpi-table td { text-align: center; white-space: nowrap; }
 table.kpi-table th:first-child, table.kpi-table td:first-child,
 table.kpi-table th:nth-child(2), table.kpi-table td:nth-child(2) { text-align: left; }

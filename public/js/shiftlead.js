@@ -1,35 +1,41 @@
-// Shift Lead tab: separate tracker from Leader Mertices, since its 4 metrics don't fit
-// the flag/onTime model used there — assignment speed is an averaged duration (not a %),
-// team-routing is a same/different-team comparison (not a checkbox), and RCA compliance
-// only applies to tickets that actually breached SLA (conditional, not a plain flag).
-// One entry per ticket: created time, assigned time, originating team, assigned team,
-// closed-within-shift flag, SLA-breached flag, and (only if breached) RCA-provided flag.
+// Shift Lead tab: tracks the Shift Lead's ASSIGNMENT performance, not engineer resolution.
+// A Shift Lead's job is Ticket Created -> Unassigned -> Shift Lead assigns -> Engineer.
+//
+// Assignment rows are derived from Neutara Ticketing's REAL per-ticket activity history
+// (GET /api/nta/issue/:key / /api/nta/issues-bulk), NOT a manually-typed log. Confirmed live
+// (2026-08-20): the bulk /issues list used for the main sync always returns activity: [], but
+// the single-issue endpoint returns a populated activity array with real assignee/department
+// change events, e.g. { field: 'assignee', oldValue: null, newValue: 'Adari Venkata Jaswanth',
+// user: { firstName, lastName, email }, createdAt }. The event's `user` is who performed the
+// assignment (the Shift Lead, when it's an initial null -> engineer assignment); its
+// `createdAt` is the real assignment timestamp; its `oldValue` on a later re-assignment of the
+// same ticket is the previous assignee. See slParseAssignmentEvents.
 const SHIFT_LEADS = [
   { key: 'abhinandan', name: 'Abhinandan Kumar' },
   { key: 'ravi', name: 'Ravi Srivastava' },
   { key: 'pragati', name: 'Pragati Pandey' },
   { key: 'akhila', name: 'Akhila Aenkoju' },
 ];
-const SHIFT_LEAD_TARGETS = {
-  assignMinutesTarget: 30,     // avg assignment time <= 30 min is "good"
-  closedWithinShiftPct: 70,    // >= 70%
-  rcaOnBreachPct: 100,         // >= 100% (every breach should get an RCA)
-};
-
-const SHIFT_LEAD_STORE_KEY = 'shiftLeadTickets';
-// Shape: { [leadKey]: [ { id, ticketKey, createdAt, assignedAt, fromTeam, toTeam, closedWithinShift, slaBreached, rcaProvided } ] }
-
-function loadShiftLeadData() {
-  try { return JSON.parse(localStorage.getItem(SHIFT_LEAD_STORE_KEY)) || {}; }
-  catch (e) { return {}; }
-}
-function saveShiftLeadData(all) {
-  localStorage.setItem(SHIFT_LEAD_STORE_KEY, JSON.stringify(all));
-}
-function getLeadTickets(all, leadKey) {
-  all[leadKey] = all[leadKey] || [];
-  return all[leadKey];
-}
+// The only engineers a Shift Lead may assign a ticket to, per team spec — used to render the
+// roster reference and to recognize real assignment events as in-scope.
+const SHIFT_LEAD_ENGINEERS = [
+  { name: 'Vamsi Malla', specialty: 'Messaging' },
+  { name: 'Shiva Amuda', specialty: 'Content' },
+  { name: 'K N V S Raj Kumar', specialty: 'Email' },
+  { name: 'Lakshmi Adabala', specialty: 'Email' },
+  { name: 'Adari Venkata Jaswanth', specialty: 'Content' },
+  { name: 'Abhinandan Kumar', specialty: 'Messaging' },
+  { name: 'Pragati Pandey', specialty: 'Messaging' },
+  { name: 'Vishal Kumar', specialty: 'Content' },
+  { name: 'Srinu Gudimitla', specialty: 'Content' },
+  { name: 'Ravi Kumar Srivastava', specialty: 'Content' },
+  { name: 'Naved', specialty: 'Content' },
+  { name: 'Akhila', specialty: 'Content' },
+  { name: 'Rehan Khan', specialty: 'Content' },
+  { name: 'Bhagyashri Vitthal Deokar', specialty: 'Email' },
+  { name: 'Kantam Hemadasu', specialty: 'Messaging' },
+];
+const SHIFT_LEAD_ASSIGN_SLA_MINUTES = 30;
 
 function slMinutesBetween(fromIso, toIso) {
   if (!fromIso || !toIso) return null;
@@ -37,386 +43,248 @@ function slMinutesBetween(fromIso, toIso) {
   if (!isFinite(ms) || ms < 0) return null;
   return ms / 60000;
 }
-function slFmtMinutes(v) { return v === null || v === undefined ? '—' : `${Math.round(v)} min`; }
+function slFmtMinutes(v) {
+  if (v === null || v === undefined) return '—';
+  if (v < 60) return `${Math.round(v)} min`;
+  const h = Math.floor(v / 60), m = Math.round(v % 60);
+  return `${h}h ${m}m`;
+}
 function slFmtPct(v) { return v === null || v === undefined ? '—' : `${v.toFixed(1)}%`; }
 function slPct(num, den) { return den ? (num / den) * 100 : null; }
 function slGoodClass(ok) { return ok === null ? '' : ok ? 'good-cell' : 'bad-cell'; }
+function slMedian(nums) {
+  if (!nums.length) return null;
+  const sorted = nums.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+function slFindLead(displayNameOrEmail) {
+  if (!displayNameOrEmail) return null;
+  const needle = displayNameOrEmail.trim().toLowerCase();
+  return SHIFT_LEADS.find(l => l.name.trim().toLowerCase() === needle) || null;
+}
+function slIsSelfAssigned(row, leadName) {
+  return !!(leadName && row.assignedTo && row.assignedTo.trim().toLowerCase() === leadName.trim().toLowerCase());
+}
 
-function slComputeAgg(tickets) {
-  const total = tickets.length;
-  const assignTimes = tickets.map(t => slMinutesBetween(t.createdAt, t.assignedAt)).filter(v => v !== null);
-  const avgAssignMinutes = assignTimes.length ? assignTimes.reduce((a, b) => a + b, 0) / assignTimes.length : null;
+// Turns one ticket's real `activity` array into a chronological list of assignment rows:
+// one row per "assignee changed" event where the new value is non-null (i.e. someone was
+// actually handed the ticket — a change to null is a hand-off away, not an assignment).
+// `assignedBy` is the event's actor (who performed the assignment); `previousAssignee` is
+// the event's oldValue (who had it right before, if anyone) — this makes reassignment chains
+// fall out naturally from the real history instead of needing to be tracked separately.
+function slParseAssignmentEvents(activity, createdAt, ticketKey) {
+  if (!Array.isArray(activity)) return [];
+  const events = activity
+    .filter(a => a.field === 'assignee' && a.newValue)
+    .slice()
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  return events.map((ev, idx) => {
+    const actorName = [ev.user && ev.user.firstName, ev.user && ev.user.lastName].filter(Boolean).join(' ').trim()
+      || (ev.user && ev.user.email) || '';
+    return {
+      ticketKey,
+      createdAt: idx === 0 ? createdAt : events[idx - 1].createdAt,
+      assignedByRaw: actorName,
+      assignedTo: ev.newValue,
+      assignedAt: ev.createdAt,
+      previousAssignee: ev.oldValue || '',
+      isFirstAssignment: idx === 0,
+    };
+  });
+}
 
-  const crossTeamCount = tickets.filter(t => t.fromTeam && t.toTeam && t.fromTeam.trim().toLowerCase() !== t.toTeam.trim().toLowerCase()).length;
-  const routedCount = tickets.filter(t => t.fromTeam && t.toTeam).length;
+// The very first engineer a ticket was ever assigned to (earliest assignee event), as
+// opposed to whoever holds it now — pulled from a ticket's parsed assignment rows.
+function slFirstAssignee(ticketRows) {
+  if (!ticketRows || !ticketRows.length) return null;
+  return ticketRows.find(r => r.isFirstAssignment) || null;
+}
 
-  const closedWithinShiftCount = tickets.filter(t => t.closedWithinShift).length;
-
-  const breached = tickets.filter(t => t.slaBreached);
-  const rcaProvidedCount = breached.filter(t => t.rcaProvided).length;
-
+// One row per assignment. "Tickets Received" = distinct tickets first attributed to this
+// lead's queue (i.e. every row, since each row IS an assignment this lead made); "Assigned"
+// = rows where assignedTo is filled in; "Still Unassigned" = rows logged without an
+// assignedTo yet (queued for this lead but not yet handed to an engineer). Self-assigned =
+// the lead put the ticket in their own name (matched against assignedTo); everything else
+// with an assignee is "assigned to others."
+function slComputeLeadStats(rows, leadName) {
+  const total = rows.length;
+  const assignedRows = rows.filter(r => r.assignedTo && r.assignedTo.trim());
+  const stillUnassigned = total - assignedRows.length;
+  const selfAssignedRows = assignedRows.filter(r => slIsSelfAssigned(r, leadName));
+  const otherAssignedRows = assignedRows.filter(r => !slIsSelfAssigned(r, leadName));
+  const times = assignedRows.map(r => slMinutesBetween(r.createdAt, r.assignedAt)).filter(v => v !== null);
+  const avgMinutes = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
+  const medianMinutes = slMedian(times);
+  const withinSlaCount = times.filter(v => v <= SHIFT_LEAD_ASSIGN_SLA_MINUTES).length;
+  const slaBreachCount = times.length - withinSlaCount;
+  const slaPct = times.length ? slPct(withinSlaCount, times.length) : null;
+  const longestUnassignedMinutes = times.length ? Math.max(...times) : null;
+  const reassignments = rows.filter(r => r.previousAssignee && r.previousAssignee.trim()).length;
   return {
-    total,
-    avgAssignMinutes,
-    crossTeamPct: slPct(crossTeamCount, routedCount),
-    closedWithinShiftPct: slPct(closedWithinShiftCount, total),
-    breachedCount: breached.length,
-    rcaOnBreachPct: breached.length ? slPct(rcaProvidedCount, breached.length) : null,
+    received: total,
+    assigned: assignedRows.length,
+    selfAssigned: selfAssignedRows.length,
+    otherAssigned: otherAssignedRows.length,
+    stillUnassigned,
+    avgMinutes,
+    medianMinutes,
+    withinSlaCount,
+    slaBreachCount,
+    slaPct,
+    longestUnassignedMinutes,
+    reassignments,
   };
 }
 
-function slScorecardHtml(agg) {
-  const assignOk = agg.avgAssignMinutes === null ? null : agg.avgAssignMinutes <= SHIFT_LEAD_TARGETS.assignMinutesTarget;
-  const crossTeamOk = agg.crossTeamPct === null ? null : agg.crossTeamPct >= 90;
-  const closedOk = agg.closedWithinShiftPct === null ? null : agg.closedWithinShiftPct >= SHIFT_LEAD_TARGETS.closedWithinShiftPct;
-  const rcaOk = agg.rcaOnBreachPct === null ? null : agg.rcaOnBreachPct >= SHIFT_LEAD_TARGETS.rcaOnBreachPct;
+function slScorecardHtml(leadName, stats) {
+  const slaOk = stats.slaPct === null ? null : stats.slaPct >= 90;
+  const avgOk = stats.avgMinutes === null ? null : stats.avgMinutes <= SHIFT_LEAD_ASSIGN_SLA_MINUTES;
   const cards = [
-    { val: slFmtMinutes(agg.avgAssignMinutes), lbl: 'Avg. Assignment Time', target: `Target: ≤ ${SHIFT_LEAD_TARGETS.assignMinutesTarget} min`, ok: assignOk },
-    { val: slFmtPct(agg.crossTeamPct), lbl: 'Cross-Team Routing', target: 'Target: ≥ 90%', ok: crossTeamOk },
-    { val: slFmtPct(agg.closedWithinShiftPct), lbl: 'Closed Within Shift', target: `Target: ≥ ${SHIFT_LEAD_TARGETS.closedWithinShiftPct}%`, ok: closedOk },
-    { val: agg.breachedCount ? slFmtPct(agg.rcaOnBreachPct) : 'N/A', lbl: 'RCA on SLA Breach', target: agg.breachedCount ? `Target: ≥ ${SHIFT_LEAD_TARGETS.rcaOnBreachPct}% (${agg.breachedCount} breached)` : 'No breaches yet', ok: agg.breachedCount ? rcaOk : null },
+    { val: stats.received, lbl: 'Tickets Received', ok: null },
+    { val: stats.assigned, lbl: 'Tickets Assigned', ok: null },
+    { val: stats.selfAssigned, lbl: 'Self-Assigned', ok: null },
+    { val: stats.otherAssigned, lbl: 'Assigned to Others', ok: null },
+    { val: stats.stillUnassigned, lbl: 'Still Unassigned', ok: stats.stillUnassigned === 0 ? true : stats.stillUnassigned > 0 ? false : null },
+    { val: slFmtMinutes(stats.avgMinutes), lbl: 'Avg. Assignment Time', ok: avgOk },
+    { val: slFmtMinutes(stats.medianMinutes), lbl: 'Median Assignment Time', ok: null },
+    { val: stats.withinSlaCount, lbl: `Assigned ≤${SHIFT_LEAD_ASSIGN_SLA_MINUTES} min`, ok: null },
+    { val: stats.slaBreachCount, lbl: 'Assignment SLA Breaches', ok: stats.slaBreachCount === 0 ? true : stats.slaBreachCount > 0 ? false : null },
+    { val: slFmtPct(stats.slaPct), lbl: 'Assignment SLA %', ok: slaOk },
+    { val: slFmtMinutes(stats.longestUnassignedMinutes), lbl: 'Longest Unassigned Ticket', ok: null },
+    { val: stats.reassignments, lbl: 'Reassignments', ok: stats.reassignments === 0 ? true : null },
   ];
   return `<div class="kpi-scorecard-block">
-    <div class="kpi-scorecard-head">This Week at a Glance <span class="kpi-block-hint">${agg.total} ticket${agg.total === 1 ? '' : 's'} logged</span></div>
+    <div class="kpi-scorecard-head">${escapeHtml(leadName)} — At a Glance</div>
     <div class="kpi-scorecard-grid">
       ${cards.map(c => `<div class="kpi-score-card ${slGoodClass(c.ok)}">
-        <div class="kpi-score-val">${c.val}</div>
+        <div class="kpi-score-val">${c.val === null || c.val === undefined ? '—' : c.val}</div>
         <div class="kpi-score-lbl">${escapeHtml(c.lbl)}</div>
-        <div class="kpi-score-target">${escapeHtml(c.target)}</div>
       </div>`).join('')}
     </div>
   </div>`;
 }
 
-function slWeeklySummaryHtml(title, ticketsByWeek, monthAgg, cls) {
-  const rowHtml = (label, agg) => {
-    const assignOk = agg.avgAssignMinutes === null ? null : agg.avgAssignMinutes <= SHIFT_LEAD_TARGETS.assignMinutesTarget;
-    const closedOk = agg.closedWithinShiftPct === null ? null : agg.closedWithinShiftPct >= SHIFT_LEAD_TARGETS.closedWithinShiftPct;
-    const rcaOk = agg.breachedCount ? agg.rcaOnBreachPct >= SHIFT_LEAD_TARGETS.rcaOnBreachPct : null;
-    return `<tr>
-      <td>${escapeHtml(label)}</td>
-      <td>${agg.total}</td>
-      <td class="${slGoodClass(assignOk)}">${slFmtMinutes(agg.avgAssignMinutes)}</td>
-      <td>${slFmtPct(agg.crossTeamPct)}</td>
-      <td class="${slGoodClass(closedOk)}">${slFmtPct(agg.closedWithinShiftPct)}</td>
-      <td class="${slGoodClass(rcaOk)}">${agg.breachedCount ? slFmtPct(agg.rcaOnBreachPct) : 'N/A'}</td>
-    </tr>`;
-  };
-  const rows = ticketsByWeek.map((wt, idx) => rowHtml(`Week ${idx + 1}`, slComputeAgg(wt))).join('');
+function slAssignmentRowHtml(row) {
+  const assignMin = slMinutesBetween(row.createdAt, row.assignedAt);
+  const withinSla = assignMin === null ? null : assignMin <= SHIFT_LEAD_ASSIGN_SLA_MINUTES;
+  return `<tr>
+    <td><a href="${browseUrl(row.ticketKey)}" target="_blank" rel="noopener">${escapeHtml(row.ticketKey)}</a></td>
+    <td>${row.createdAt ? new Date(row.createdAt).toLocaleString() : '—'}</td>
+    <td>${escapeHtml(row.assignedByRaw || '—')}</td>
+    <td>${escapeHtml(row.assignedTo)}${row.isFirstAssignment ? ' <span class="kpi-block-hint">(first)</span>' : ''}</td>
+    <td>${row.assignedAt ? new Date(row.assignedAt).toLocaleString() : '—'}</td>
+    <td class="${slGoodClass(withinSla)}">${slFmtMinutes(assignMin)}</td>
+    <td>${row.previousAssignee ? escapeHtml(row.previousAssignee) : '—'}</td>
+  </tr>`;
+}
+
+function slAssignmentLogTableHtml(title, rows, cls) {
+  if (!rows.length) {
+    return `<div class="kpi-summary-block">
+      <div class="kpi-block-header ${cls}">${escapeHtml(title)}</div>
+      <div class="empty-state">No real assignment events found for this lead in the current Dev ticket set.</div>
+    </div>`;
+  }
+  const sorted = rows.slice().sort((a, b) => new Date(b.assignedAt) - new Date(a.assignedAt));
   return `<div class="kpi-summary-block">
-    <div class="kpi-block-header ${cls}">${escapeHtml(title)} — Weekly Summary</div>
+    <div class="kpi-block-header ${cls}">${escapeHtml(title)} <span class="kpi-block-hint">${rows.length} assignment${rows.length === 1 ? '' : 's'} — "(first)" marks a ticket's very first assignment event</span></div>
     <div class="table-wrap"><div class="table-scroll"><table class="kpi-table">
-      <thead><tr><th>Week</th><th>Tickets</th><th>Avg. Assign Time</th><th>Cross-Team %</th><th>Closed Within Shift %</th><th>RCA on Breach %</th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot>${rowHtml('MONTH TO', monthAgg)}</tfoot>
+      <thead><tr><th>Ticket</th><th>Created At</th><th>Assigned By</th><th>Assigned To</th><th>Assigned At</th><th>Assignment Time</th><th>Previous Assignee</th></tr></thead>
+      <tbody>${sorted.map(slAssignmentRowHtml).join('')}</tbody>
     </table></div></div>
   </div>`;
 }
 
-function slTicketRowHtml(leadKey, t) {
-  const assignMin = slMinutesBetween(t.createdAt, t.assignedAt);
-  const crossTeam = (t.fromTeam && t.toTeam) ? (t.fromTeam.trim().toLowerCase() !== t.toTeam.trim().toLowerCase()) : null;
-  return `<tr data-ticket-id="${t.id}">
-    <td>${escapeHtml(t.ticketKey || '(unnamed)')}</td>
-    <td>${t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}</td>
-    <td>${t.assignedAt ? new Date(t.assignedAt).toLocaleString() : '—'}</td>
-    <td class="${slGoodClass(assignMin === null ? null : assignMin <= SHIFT_LEAD_TARGETS.assignMinutesTarget)}">${slFmtMinutes(assignMin)}</td>
-    <td>${escapeHtml(t.fromTeam || '—')} → ${escapeHtml(t.toTeam || '—')} ${crossTeam === null ? '' : crossTeam ? '✅' : '⚠️'}</td>
-    <td>${t.closedWithinShift ? '✅' : ''}</td>
-    <td>${t.slaBreached ? '🔴' : ''}</td>
-    <td>${t.slaBreached ? (t.rcaProvided ? '✅' : '❌') : '—'}</td>
-    <td><button type="button" class="secondary kpi-delete-project-btn" data-leader="${leadKey}" data-project-id="${t.id}">Delete</button></td>
-  </tr>`;
+// Roster reference block — no longer an entry form (nothing to log manually anymore; data
+// comes straight from Neutara's real activity history), just a reminder of who's in scope.
+function slEngineerRosterHtml() {
+  return `<div class="kpi-block-hint" style="margin:8px 0 14px;">Engineer roster in scope: ${SHIFT_LEAD_ENGINEERS.map(e => escapeHtml(e.name)).join(', ')}</div>`;
 }
 
-function slDailyLogHtml(leadKey, shiftKey, shiftLabel, tickets, anchor, cls, expandedWeek) {
-  const groups = [];
-  for (let w = 0; w < LEADER_METRICS_WEEKS; w++) {
-    const isOpen = w === expandedWeek;
-    const weekTickets = [];
-    for (let d = 0; d < LEADER_METRICS_DAYS; d++) {
-      const dateStr = addDaysIso(anchor, w * 7 + d);
-      weekTickets.push(...tickets.filter(t => t.shift === shiftKey && t.logDate === dateStr));
-    }
-    const weekAgg = slComputeAgg(weekTickets);
-    let dayRowsHtml = '';
-    if (isOpen) {
-      for (let d = 0; d < LEADER_METRICS_DAYS; d++) {
-        const dateStr = addDaysIso(anchor, w * 7 + d);
-        const dayTickets = tickets.filter(t => t.shift === shiftKey && t.logDate === dateStr);
-        const isToday = dateStr === todayIso();
-        dayRowsHtml += `<tr class="kpi-day-group-row${isToday ? ' kpi-today-row' : ''}"><td colspan="9">
-          Day ${d + 1} — ${fmtRangeDate(dateStr)}${isToday ? ' <span class="kpi-today-tag">Today</span>' : ''}
-        </td></tr>`;
-        if (!dayTickets.length) {
-          dayRowsHtml += `<tr><td colspan="9" class="kpi-empty-day">No tickets logged here yet.</td></tr>`;
-        } else {
-          dayTickets.forEach(t => { dayRowsHtml += slTicketRowHtml(leadKey, t); });
-        }
-      }
-    }
-    groups.push(`
-      <button type="button" class="kpi-week-toggle${isOpen ? ' open' : ''}" data-leader="${leadKey}" data-toggle-week="${w}">
-        <span class="kpi-week-caret">${isOpen ? '▾' : '▸'}</span> Week ${w + 1}
-        <span class="kpi-week-toggle-sub">${weekAgg.total} tickets · Avg assign ${slFmtMinutes(weekAgg.avgAssignMinutes)}</span>
-      </button>
-      ${isOpen ? `<table class="kpi-table kpi-daily-table">
-        <thead><tr><th>Ticket</th><th>Created</th><th>Assigned</th><th>Assign Time</th><th>Routing</th><th>Closed in Shift</th><th>SLA Breach</th><th>RCA</th><th></th></tr></thead>
-        <tbody>${dayRowsHtml}</tbody>
-      </table>` : ''}
-    `);
-  }
-  return `<div class="kpi-summary-block">
-    <div class="kpi-block-header ${cls}">Log — ${escapeHtml(shiftLabel)} <span class="kpi-block-hint">Tickets are bucketed by the date logged</span></div>
-    <div class="table-wrap">${groups.join('')}</div>
-  </div>`;
+// Fetches real activity history (via the backend's cached bulk endpoint) for every given
+// ticket key, in one batched request, and returns { [cfKey]: assignmentRows[] }.
+async function slFetchAssignmentRowsForTickets(cfKeys) {
+  if (!cfKeys.length) return {};
+  const { issues } = await Api.getNtaIssuesBulk(cfKeys);
+  const out = {};
+  Object.entries(issues).forEach(([key, issue]) => {
+    out[key] = issue ? slParseAssignmentEvents(issue.activity, issue.createdAt, issue.cfKey || key) : [];
+  });
+  return out;
 }
 
-function slAddTicketFormHtml(leadKey, detailsOpen) {
-  return `<div class="kpi-add-project">
-    <div class="kpi-add-project-title">Log a ticket</div>
-    <div class="kpi-add-project-fields">
-      <label>Ticket key<input type="text" id="${leadKey}NewTicket" placeholder="e.g. L2B-1234"></label>
-      <button type="button" class="secondary" id="${leadKey}FetchTicketBtn">Fetch from tickets</button>
-      <label>Shift
-        <select id="${leadKey}NewShift">
-          ${LEADER_METRICS_SHIFTS.map(s => `<option value="${s.key}">${escapeHtml(s.label)}</option>`).join('')}
-        </select>
-      </label>
-      <label>Log date<input type="date" id="${leadKey}NewLogDate" value="${todayIso()}"></label>
-      <button type="button" class="primary" id="${leadKey}AddTicketBtn">Add ticket</button>
-    </div>
-    <div class="kpi-block-hint" id="${leadKey}FetchStatus" style="margin-top:6px;"></div>
-    <button type="button" class="kpi-details-toggle" id="${leadKey}DetailsToggle">
-      ${detailsOpen ? '▾' : '▸'} More details <span class="kpi-block-hint">(timestamps, routing, closure, SLA/RCA)</span>
-    </button>
-    <div class="kpi-add-project-details" style="${detailsOpen ? '' : 'display:none;'}">
-      <div class="kpi-add-project-fields">
-        <label>Ticket created at<input type="datetime-local" id="${leadKey}NewCreatedAt"></label>
-        <label>Assigned at<input type="datetime-local" id="${leadKey}NewAssignedAt"></label>
-        <label>Originating team<input type="text" id="${leadKey}NewFromTeam" placeholder="e.g. Support Queue"></label>
-        <label>Assigned to team<input type="text" id="${leadKey}NewToTeam" placeholder="e.g. Migration ENT"></label>
-      </div>
-      <div class="kpi-add-project-checkboxes" style="margin-top:10px;">
-        <label class="kpi-add-checkbox"><input type="checkbox" id="${leadKey}NewClosedWithinShift"> Closed within shift</label>
-        <label class="kpi-add-checkbox"><input type="checkbox" id="${leadKey}NewSlaBreached"> SLA breached</label>
-        <label class="kpi-add-checkbox" id="${leadKey}RcaWrap" style="display:none;"><input type="checkbox" id="${leadKey}NewRcaProvided"> RCA provided</label>
-      </div>
-    </div>
-  </div>`;
-}
-
-// Parses "HH:MM" from a LEADER_METRICS_SHIFTS `time` label like "1pm – 10pm" into
-// 24-hour start/end hours, so a resolved-at timestamp can be checked against shift hours.
-function slShiftHourRange(shiftKey) {
-  return shiftKey === 'day' ? { startHour: 13, endHour: 22 } : { startHour: 21, endHour: 6 };
-}
-function slResolvedWithinShift(resolutiondate, logDate, shiftKey) {
-  if (!resolutiondate) return false;
-  const { startHour, endHour } = slShiftHourRange(shiftKey);
-  const resolved = new Date(resolutiondate);
-  const dayStart = new Date(logDate + 'T00:00:00');
-  const rangeStart = new Date(dayStart); rangeStart.setHours(startHour, 0, 0, 0);
-  let rangeEnd = new Date(dayStart); rangeEnd.setHours(endHour, 0, 0, 0);
-  if (endHour <= startHour) rangeEnd.setDate(rangeEnd.getDate() + 1); // overnight shift
-  return resolved >= rangeStart && resolved <= rangeEnd;
-}
-
-// Looks up a ticket key against the last completed Neutara Ticketing sync and auto-fills
-// whatever the API actually exposes (SLA breach, created time, RCA-text presence). There's
-// no assignment-timestamp or team-transfer history in the Neutara API (see README), so
-// Assigned-at and originating/assigned team stay manual — this only pre-fills what's real.
-async function slFetchTicketData(leadKey) {
-  const keyInput = document.getElementById(`${leadKey}NewTicket`);
-  const statusEl = document.getElementById(`${leadKey}FetchStatus`);
-  const ticketKey = keyInput.value.trim().toUpperCase();
-  if (!ticketKey) { statusEl.textContent = 'Enter a ticket key first.'; return; }
-  statusEl.textContent = 'Looking up…';
-
-  const detailsPanel = document.getElementById(`${leadKey}RcaWrap`) && document.getElementById(`${leadKey}RcaWrap`).closest('.kpi-add-project-details');
-  if (detailsPanel && detailsPanel.style.display === 'none') {
-    detailsPanel.style.display = '';
-    const ui = loadUiState();
-    ui[`shiftlead_${leadKey}`] = ui[`shiftlead_${leadKey}`] || {};
-    ui[`shiftlead_${leadKey}`].detailsOpen = true;
-    saveUiState(ui);
-  }
-
-  const data = await Api.getNtaCurrent().catch(() => null);
-  if (!data) { statusEl.textContent = 'No Neutara Ticketing sync available — enter details manually.'; return; }
-  const issue = data.issues.find(i => (i.key || '').toUpperCase() === ticketKey);
-  if (!issue) { statusEl.textContent = `"${ticketKey}" not found in the last sync — enter details manually.`; return; }
-
-  const f = issue.fields || {};
-  const shift = document.getElementById(`${leadKey}NewShift`).value;
-  const logDate = document.getElementById(`${leadKey}NewLogDate`).value || todayIso();
-
-  if (f.created) document.getElementById(`${leadKey}NewCreatedAt`).value = new Date(f.created).toISOString().slice(0, 16);
-  document.getElementById(`${leadKey}NewToTeam`).value = issue.teamKey || issue.department || '';
-
-  const slaCb = document.getElementById(`${leadKey}NewSlaBreached`);
-  slaCb.checked = !!issue.rb;
-  slaCb.dispatchEvent(new Event('change'));
-
-  if (issue.rb) {
-    document.getElementById(`${leadKey}NewRcaProvided`).checked = !!(f.rootCause && f.rootCause.trim());
-  }
-
-  document.getElementById(`${leadKey}NewClosedWithinShift`).checked = slResolvedWithinShift(f.resolutiondate, logDate, shift);
-
-  statusEl.textContent = `Loaded "${ticketKey}" — Assigned-at and team-transfer aren't tracked by Neutara Ticketing, so fill those in manually if known.`;
-}
+let slAllAssignmentRows = []; // flattened across every fetched ticket, refreshed by loadUnassignedDevSection
 
 function buildShiftLeadPanel(leadKey) {
   const pageId = `shiftlead-${leadKey}`;
   const page = document.getElementById(pageId);
   if (!page) return;
-  const all = loadShiftLeadData();
-  const tickets = getLeadTickets(all, leadKey);
-  const anchor = getAnchor(`shiftlead_${leadKey}`);
-
-  const dayTickets = tickets.filter(t => t.shift === 'day');
-  const nightTickets = tickets.filter(t => t.shift === 'night');
-  const ticketsByWeek = (list) => Array.from({ length: LEADER_METRICS_WEEKS }, (_, w) => {
-    const from = addDaysIso(anchor, w * 7);
-    const to = addDaysIso(anchor, w * 7 + 6);
-    return list.filter(t => t.logDate >= from && t.logDate <= to);
-  });
-  const dayByWeek = ticketsByWeek(dayTickets);
-  const nightByWeek = ticketsByWeek(nightTickets);
-  const bothByWeek = dayByWeek.map((wk, i) => wk.concat(nightByWeek[i]));
-  const dayMonthAgg = slComputeAgg(dayByWeek.flat());
-  const nightMonthAgg = slComputeAgg(nightByWeek.flat());
-  const bothMonthAgg = slComputeAgg(bothByWeek.flat());
-
-  const uiState = loadUiState();
-  const uiKey = `shiftlead_${leadKey}`;
-  const leadUi = uiState[uiKey] || {};
-  const todaySlotForExpand = slotForDate(anchor, todayIso());
-  const expandedWeek = leadUi.expandedWeek !== undefined ? leadUi.expandedWeek : (todaySlotForExpand ? todaySlotForExpand.week : 0);
-  const currentWeekIdx = todaySlotForExpand ? todaySlotForExpand.week : 0;
-  const activeInner = leadUi.innerTab || 'overview';
-  const detailsOpen = !!leadUi.detailsOpen;
-
-  const sections = {
-    overview: `${slScorecardHtml(slComputeAgg(bothByWeek[currentWeekIdx]))}
-      ${slWeeklySummaryHtml('Both Shifts Together', bothByWeek, bothMonthAgg, 'kpi-head-both')}`,
-    day: `${slWeeklySummaryHtml('Day Shift', dayByWeek, dayMonthAgg, 'kpi-head-day')}
-      ${slDailyLogHtml(leadKey, 'day', 'Day Shift', tickets, anchor, 'kpi-head-day', expandedWeek)}`,
-    night: `${slWeeklySummaryHtml('Night Shift', nightByWeek, nightMonthAgg, 'kpi-head-night')}
-      ${slDailyLogHtml(leadKey, 'night', 'Night Shift', tickets, anchor, 'kpi-head-night', expandedWeek)}`,
-  };
+  const leadName = SHIFT_LEADS.find(l => l.key === leadKey).name;
+  const rows = slAllAssignmentRows.filter(r => slFindLead(r.assignedByRaw) && slFindLead(r.assignedByRaw).key === leadKey);
+  const stats = slComputeLeadStats(rows, leadName);
 
   page.innerHTML = `
-    <h3 style="margin:16px 0 10px;">Shift Lead KPI Tracker</h3>
-    ${calendarRangeBarHtml(uiKey, anchor)}
+    <h3 style="margin:16px 0 10px;">Shift Lead KPI Tracker — ${escapeHtml(leadName)}</h3>
     <div class="kpi-targets-bar">
       <span class="kpi-targets-label">TARGETS</span>
-      <span>Avg. Assignment Time: <b>&le;${SHIFT_LEAD_TARGETS.assignMinutesTarget} min</b></span>
-      <span>Cross-Team Routing: <b>&ge;90%</b></span>
-      <span>Closed Within Shift: <b>&ge;${SHIFT_LEAD_TARGETS.closedWithinShiftPct}%</b></span>
-      <span>RCA on SLA Breach: <b>&ge;${SHIFT_LEAD_TARGETS.rcaOnBreachPct}%</b></span>
+      <span>Avg. Assignment Time: <b>&le;${SHIFT_LEAD_ASSIGN_SLA_MINUTES} min</b></span>
+      <span>Assignment SLA %: <b>&ge;90%</b></span>
+      <span>Still Unassigned: <b>0</b></span>
+      <span>Reassignments: <b>0</b></span>
     </div>
-    ${slAddTicketFormHtml(leadKey, detailsOpen)}
-    ${innerTabsHtml(leadKey, activeInner)}
-    <div class="kpi-inner-tab-body">${sections[activeInner] || sections.overview}</div>
+    <div class="kpi-block-hint" style="margin:6px 0 14px;">Computed from Neutara Ticketing's real assignment history for the Dev tickets currently loaded below (see "Dev Board Tickets") — not a manual log.</div>
+    ${slScorecardHtml(leadName, stats)}
+    ${slAssignmentLogTableHtml('Assignment History', rows, 'kpi-head-both')}
   `;
-
-  const slaCb = document.getElementById(`${leadKey}NewSlaBreached`);
-  const rcaWrap = document.getElementById(`${leadKey}RcaWrap`);
-  if (slaCb && rcaWrap) {
-    slaCb.addEventListener('change', () => { rcaWrap.style.display = slaCb.checked ? '' : 'none'; });
-  }
-
-  document.getElementById(`${leadKey}FetchTicketBtn`).addEventListener('click', () => slFetchTicketData(leadKey));
-
-  const detailsToggle = document.getElementById(`${leadKey}DetailsToggle`);
-  if (detailsToggle) detailsToggle.addEventListener('click', () => {
-    const ui = loadUiState();
-    ui[uiKey] = ui[uiKey] || {};
-    ui[uiKey].detailsOpen = !ui[uiKey].detailsOpen;
-    saveUiState(ui);
-    buildShiftLeadPanel(leadKey);
-  });
-
-  page.querySelectorAll('.kpi-inner-tabs button[data-inner-tab]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const { innerTab } = btn.dataset;
-      const ui = loadUiState();
-      ui[uiKey] = ui[uiKey] || {};
-      ui[uiKey].innerTab = innerTab;
-      saveUiState(ui);
-      buildShiftLeadPanel(leadKey);
-    });
-  });
-
-  document.getElementById(`${leadKey}AddTicketBtn`).addEventListener('click', () => {
-    const ticketKey = document.getElementById(`${leadKey}NewTicket`).value.trim();
-    const shift = document.getElementById(`${leadKey}NewShift`).value;
-    const logDate = document.getElementById(`${leadKey}NewLogDate`).value;
-    if (!logDate) { document.getElementById(`${leadKey}NewLogDate`).focus(); return; }
-    const createdAtEl = document.getElementById(`${leadKey}NewCreatedAt`);
-    const assignedAtEl = document.getElementById(`${leadKey}NewAssignedAt`);
-    const slaBreached = document.getElementById(`${leadKey}NewSlaBreached`).checked;
-    const entry = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      ticketKey, shift, logDate,
-      createdAt: createdAtEl.value || null,
-      assignedAt: assignedAtEl.value || null,
-      fromTeam: document.getElementById(`${leadKey}NewFromTeam`).value.trim(),
-      toTeam: document.getElementById(`${leadKey}NewToTeam`).value.trim(),
-      closedWithinShift: document.getElementById(`${leadKey}NewClosedWithinShift`).checked,
-      slaBreached,
-      rcaProvided: slaBreached ? document.getElementById(`${leadKey}NewRcaProvided`).checked : false,
-    };
-    const current = loadShiftLeadData();
-    getLeadTickets(current, leadKey).push(entry);
-    saveShiftLeadData(current);
-    buildShiftLeadPanel(leadKey);
-  });
-
-  page.querySelectorAll('.kpi-delete-project-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const { leader, projectId } = btn.dataset;
-      const current = loadShiftLeadData();
-      current[leader] = getLeadTickets(current, leader).filter(t => t.id !== projectId);
-      saveShiftLeadData(current);
-      buildShiftLeadPanel(leader);
-    });
-  });
-
-  document.getElementById(`${uiKey}AnchorInput`).addEventListener('change', (e) => {
-    if (!e.target.value) return;
-    const anchors = loadAnchors();
-    anchors[uiKey] = e.target.value;
-    saveAnchors(anchors);
-    buildShiftLeadPanel(leadKey);
-  });
-  document.getElementById(`${uiKey}ResetAnchorBtn`).addEventListener('click', () => {
-    const anchors = loadAnchors();
-    anchors[uiKey] = isoDate(mostRecentMonday(new Date()));
-    saveAnchors(anchors);
-    buildShiftLeadPanel(leadKey);
-  });
-
-  page.querySelectorAll('.kpi-week-toggle').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const { toggleWeek } = btn.dataset;
-      const ui = loadUiState();
-      const w = Number(toggleWeek);
-      ui[uiKey] = ui[uiKey] || {};
-      ui[uiKey].expandedWeek = ui[uiKey].expandedWeek === w ? -1 : w;
-      saveUiState(ui);
-      buildShiftLeadPanel(leadKey);
-    });
-  });
 }
 
-// Live check (not history-based — Neutara Ticketing has no changelog) for tickets that
-// are CURRENTLY in the Dev department with no assignee, using the last completed sync.
+// Cross-lead comparison table — computed from the same real-history rows as each lead panel.
+function buildShiftLeadComparisonTable() {
+  const el = document.getElementById('shiftLeadComparisonSection');
+  if (!el) return;
+  const rowsHtml = SHIFT_LEADS.map(lead => {
+    const rows = slAllAssignmentRows.filter(r => slFindLead(r.assignedByRaw) && slFindLead(r.assignedByRaw).key === lead.key);
+    const stats = slComputeLeadStats(rows, lead.name);
+    const slaOk = stats.slaPct === null ? null : stats.slaPct >= 90;
+    return `<tr>
+      <td>${escapeHtml(lead.name)}</td>
+      <td>${stats.received}</td>
+      <td>${stats.assigned}</td>
+      <td>${stats.selfAssigned}</td>
+      <td>${stats.otherAssigned}</td>
+      <td class="${slGoodClass(stats.stillUnassigned === 0 ? true : stats.stillUnassigned > 0 ? false : null)}">${stats.stillUnassigned}</td>
+      <td>${slFmtMinutes(stats.avgMinutes)}</td>
+      <td>${slFmtMinutes(stats.medianMinutes)}</td>
+      <td>${stats.withinSlaCount}</td>
+      <td>${stats.slaBreachCount}</td>
+      <td class="${slGoodClass(slaOk)}">${slFmtPct(stats.slaPct)}</td>
+      <td>${slFmtMinutes(stats.longestUnassignedMinutes)}</td>
+      <td>${stats.reassignments}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<div class="table-scroll"><table class="kpi-table">
+    <thead><tr><th>Shift Lead</th><th>Received</th><th>Assigned</th><th>Self-Assigned</th><th>Assigned to Others</th><th>Still Unassigned</th><th>Avg. Assign Time</th><th>Median Assign Time</th><th>Assigned ≤30 min</th><th>SLA Breaches</th><th>Assignment SLA %</th><th>Longest Unassigned</th><th>Reassignments</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table></div>`;
+}
+
+function slRebuildAllPanels() {
+  SHIFT_LEADS.forEach(l => buildShiftLeadPanel(l.key));
+  buildShiftLeadComparisonTable();
+}
+
+// Loads Dev Board Tickets (optionally date-filtered), fetches each one's REAL assignment
+// history from Neutara (batched, cached server-side), and renders them grouped by which
+// Shift Lead's name shows up as the actor on that ticket's most recent assignment event.
+// Tickets with no assignee-change event by a recognized Shift Lead land in "Not Yet
+// Assigned by a Shift Lead" — either truly untouched, or assigned by someone outside the
+// 4-person roster (e.g. self-assigned by an engineer, or an older ticket predating tracking).
 async function loadUnassignedDevSection() {
   const statusEl = document.getElementById('unassignedDevStatus');
   const sectionEl = document.getElementById('unassignedDevSection');
+  const dateInput = document.getElementById('unassignedDevDateInput');
+  const filterDate = dateInput.value; // '' means all-time
   statusEl.textContent = 'Loading…';
   const data = await Api.getNtaCurrent().catch(() => null);
   if (!data) {
@@ -424,29 +292,101 @@ async function loadUnassignedDevSection() {
     sectionEl.innerHTML = '<div class="empty-state">No Neutara Ticketing sync yet. Trigger one in Settings.</div>';
     return;
   }
-  // Checks the Dev-specific assignee (a ticket keeps a separate assignee per department it
-  // has touched), not the single top-level assignee, which reflects whichever department is
-  // currently active and can be populated even while Dev itself has nobody assigned.
-  const matches = data.issues.filter(i => i.department === 'Dev' && !(i.deptAssignees && i.deptAssignees.Dev));
-  statusEl.textContent = 'Updated ' + new Date().toLocaleString();
+  const sameDay = (iso) => iso && new Date(iso).toISOString().slice(0, 10) === filterDate;
+  let matches = data.issues.filter(i => i.cfKey && i.department === 'Dev');
+  if (filterDate) {
+    matches = matches.filter(i => sameDay(i.fields.created) || sameDay(i.fields.resolutiondate));
+  }
   if (!matches.length) {
-    sectionEl.innerHTML = '<div class="empty-state">No unassigned tickets currently in Dev. 🎉</div>';
+    statusEl.textContent = `Updated ${new Date().toLocaleString()} — 0 tickets`;
+    const scope = filterDate ? `created or resolved on ${filterDate}` : 'currently';
+    sectionEl.innerHTML = `<div class="empty-state">No CF tickets ${scope} in Dev. 🎉</div>`;
+    slAllAssignmentRows = [];
+    slRebuildAllPanels();
     return;
   }
-  const rows = matches.map(i => `<tr>
-    <td><a href="${browseUrl(i.key)}" target="_blank" rel="noopener">${escapeHtml(i.key)}</a></td>
+
+  // Fetching real history is one API call per ticket server-side — bound how many we pull
+  // per load so a wide all-time/no-date-filter view stays responsive.
+  const FETCH_CAP = 300;
+  const capped = matches.slice(0, FETCH_CAP);
+  statusEl.textContent = `Fetching real assignment history for ${capped.length} of ${matches.length} ticket${matches.length === 1 ? '' : 's'}…`;
+
+  const historyByKey = await slFetchAssignmentRowsForTickets(capped.map(i => i.cfKey.toUpperCase())).catch(() => ({}));
+  slAllAssignmentRows = Object.values(historyByKey).flat();
+
+  statusEl.textContent = `Updated ${new Date().toLocaleString()} — ${matches.length} ticket${matches.length === 1 ? '' : 's'}`
+    + (matches.length > FETCH_CAP ? ` (history fetched for the first ${FETCH_CAP}; narrow the date filter to see the rest)` : '');
+
+  const rowHtml = (i) => {
+    // Checks the Dev-specific assignee (a ticket keeps a separate assignee per department
+    // it has touched), not the single top-level assignee, which reflects whichever
+    // department is currently active and can be populated even while Dev has nobody.
+    const devAssignee = i.deptAssignees && i.deptAssignees.Dev;
+    const assigneeLabel = devAssignee
+      ? `<span style="color:#15803d;font-weight:600;">✅ ${escapeHtml(devAssignee.displayName || devAssignee.email)}</span>`
+      : '<span style="color:#b91c1c;font-weight:600;">⚠️ Unassigned</span>';
+    const ticketRows = historyByKey[i.cfKey.toUpperCase()] || [];
+    const latest = ticketRows.slice().sort((a, b) => new Date(b.assignedAt) - new Date(a.assignedAt))[0];
+    const first = slFirstAssignee(ticketRows);
+    const assignedByLabel = latest ? escapeHtml(latest.assignedByRaw || '—') : '<span class="kpi-block-hint">no assignment event</span>';
+    const firstAssigneeLabel = first
+      ? `${escapeHtml(first.assignedTo)} <span class="kpi-block-hint">by ${escapeHtml(first.assignedByRaw || '—')}, ${new Date(first.assignedAt).toLocaleString()}</span>`
+      : '<span class="kpi-block-hint">no assignment event</span>';
+    return `<tr class="${devAssignee ? 'dev-row-assigned' : 'dev-row-unassigned'}">
+    <td><a href="${browseUrl(i.cfKey)}" target="_blank" rel="noopener">${escapeHtml(i.cfKey)}</a></td>
     <td>${escapeHtml(i.fields.summary || '')}</td>
     <td>${escapeHtml(i.fields.status.name || '')}</td>
-    <td>${i.fields.created ? new Date(i.fields.created).toLocaleDateString() : '—'}</td>
-    <td>${i.fields.updated ? new Date(i.fields.updated).toLocaleDateString() : '—'}</td>
-  </tr>`).join('');
-  sectionEl.innerHTML = `<div class="table-scroll"><table class="kpi-table">
-    <thead><tr><th>Key</th><th>Summary</th><th>Status</th><th>Created</th><th>Updated</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>`;
+    <td>${assigneeLabel}</td>
+    <td>${i.fields.created ? new Date(i.fields.created).toLocaleString() : '—'}</td>
+    <td>${i.fields.resolutiondate ? new Date(i.fields.resolutiondate).toLocaleString() : '—'}</td>
+    <td>${firstAssigneeLabel}</td>
+    <td>${assignedByLabel}</td>
+  </tr>`;
+  };
+
+  const theadHtml = `<thead><tr><th>CF Ticket</th><th>Summary</th><th>Status</th><th>Dev Assignee</th><th>Created</th><th>Resolved</th><th>First Assignee</th><th>Last Assigned By</th></tr></thead>`;
+
+  // Groups tickets by which Shift Lead performed their most recent real assignment event.
+  const groupKeyFor = (i) => {
+    const ticketRows = historyByKey[i.cfKey.toUpperCase()] || [];
+    const latest = ticketRows.slice().sort((a, b) => new Date(b.assignedAt) - new Date(a.assignedAt))[0];
+    const lead = latest ? slFindLead(latest.assignedByRaw) : null;
+    return lead ? lead.key : null;
+  };
+  const groups = new Map();
+  groups.set(null, []);
+  SHIFT_LEADS.forEach(l => groups.set(l.key, []));
+  capped.forEach(i => {
+    const key = groupKeyFor(i);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  });
+
+  const groupBlocks = [];
+  const notYetLogged = groups.get(null);
+  if (notYetLogged.length) {
+    groupBlocks.push(`<div class="kpi-block-header kpi-head-alert" style="border-radius:8px;margin-top:14px;">Not Assigned by a Shift Lead <span class="kpi-block-hint">${notYetLogged.length} ticket${notYetLogged.length === 1 ? '' : 's'} — either unassigned, or assigned by someone outside the 4-person Shift Lead roster</span></div>
+      <div class="table-scroll"><table class="kpi-table">${theadHtml}<tbody>${notYetLogged.map(rowHtml).join('')}</tbody></table></div>`);
+  }
+  SHIFT_LEADS.forEach(lead => {
+    const leadTickets = groups.get(lead.key) || [];
+    if (!leadTickets.length) return;
+    groupBlocks.push(`<div class="kpi-block-header kpi-head-both" style="border-radius:8px;margin-top:14px;">${escapeHtml(lead.name)} <span class="kpi-block-hint">${leadTickets.length} ticket${leadTickets.length === 1 ? '' : 's'} assigned</span></div>
+      <div class="table-scroll"><table class="kpi-table">${theadHtml}<tbody>${leadTickets.map(rowHtml).join('')}</tbody></table></div>`);
+  });
+
+  sectionEl.innerHTML = groupBlocks.join('');
+  slRebuildAllPanels();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  SHIFT_LEADS.forEach(l => buildShiftLeadPanel(l.key));
+  document.getElementById('unassignedDevDateInput').value = todayIso();
   document.getElementById('refreshUnassignedDevBtn').addEventListener('click', loadUnassignedDevSection);
+  document.getElementById('unassignedDevDateInput').addEventListener('change', loadUnassignedDevSection);
+  document.getElementById('unassignedDevAllTimeBtn').addEventListener('click', () => {
+    document.getElementById('unassignedDevDateInput').value = '';
+    loadUnassignedDevSection();
+  });
+  slRebuildAllPanels();
 });
