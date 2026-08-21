@@ -6,6 +6,7 @@ const configStore = require('../lib/configStore');
 const ntaSync = require('../lib/ntaSync');
 const ntaStore = require('../lib/ntaStore');
 const activityCache = require('../lib/ntaActivityCache');
+const devTransferCheck = require('../lib/devTransferCheck');
 
 function requireConfig(req, res) {
   const cfg = configStore.readConfig();
@@ -151,6 +152,33 @@ router.post('/issues-bulk', async (req, res) => {
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, keys.length) }, worker));
   res.json({ issues: result });
+});
+
+// POST /api/nta/dev-transfer-check -> starts (or no-ops if already running) a background
+// crawl of every current Dev ticket's real activity history, checking each Dev-transfer
+// event against the 4-person Shift Lead roster. Heavy (one API call per Dev ticket), so it
+// runs in the background — poll GET /dev-transfer-check-status, then GET
+// /dev-transfer-check-results once finished.
+router.post('/dev-transfer-check', async (req, res) => {
+  const cfg = requireConfig(req, res);
+  if (!cfg) return;
+  devTransferCheck.runCheck(); // fire-and-forget; poll status separately
+  res.json(devTransferCheck.getStatus());
+});
+
+router.get('/dev-transfer-check-status', (req, res) => {
+  res.json(devTransferCheck.getStatus());
+});
+
+router.get('/dev-transfer-check-results', (req, res) => {
+  res.json({ results: devTransferCheck.getResults() });
+});
+
+// GET /api/nta/dev-first-assignees -> { firstAssignees: [...] } — the very first real
+// assignee ever recorded on each current Dev ticket, populated by the same background crawl
+// as /dev-transfer-check (one activity fetch per ticket, reused for both).
+router.get('/dev-first-assignees', (req, res) => {
+  res.json({ firstAssignees: devTransferCheck.getFirstAssignees() });
 });
 
 // GET /api/nta/current -> the cached, mapped dataset from the last completed sync

@@ -187,6 +187,29 @@ tr.kpi-today-row td { background: #eef2ff; }
   cursor: pointer; padding: 8px 0 0; text-align: left;
 }
 .kpi-details-toggle:hover { text-decoration: underline; }
+
+/* Collapsible section wrapper (native <details>/<summary>) used to keep dense report tabs
+   (e.g. Shift Lead) from dumping every table onto the page at once — collapsed by default,
+   summary line stays visible so users can see what's inside before opening it. */
+.kpi-collapsible { margin-bottom: 22px; }
+.kpi-collapsible > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 8px;
+}
+.kpi-collapsible > summary::-webkit-details-marker { display: none; }
+.kpi-collapsible > summary::before {
+  content: '▸'; font-size: 11px; color: #6b7280; transition: transform 0.15s ease;
+}
+.kpi-collapsible[open] > summary::before { transform: rotate(90deg); }
+.kpi-collapsible > summary .kpi-block-header { margin: 0; flex: 1; }
+.kpi-week-collapsible { margin-top: 12px; }
+.kpi-week-collapsible > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 8px;
+}
+.kpi-week-collapsible > summary::-webkit-details-marker { display: none; }
+.kpi-week-collapsible > summary::before {
+  content: '▸'; font-size: 11px; color: #6b7280; transition: transform 0.15s ease;
+}
+.kpi-week-collapsible[open] > summary::before { transform: rotate(90deg); }
 .kpi-add-project-details { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eef0f2; }
 .kpi-mark-all-good-btn { font-size: 11.5px; padding: 4px 10px; margin-bottom: 10px; }
 .kpi-add-project-checkboxes { display: flex; flex-wrap: wrap; gap: 10px 18px; }
@@ -210,3 +233,77 @@ tr.kpi-today-row td { background: #eef2ff; }
 .rca-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; }
 .rca-card .rca-title { font-weight: 700; font-size: 13px; }
 .rca-card .rca-meta { font-size: 11px; color: #6b7280; margin: 2px 0 6px; }
+
+/* ===================== Shift Lead dashboard ===================== */
+/* Hero KPI row — the "at a glance" strip at the very top of the tab. Bigger than the
+   generic .card/.kpi-score-card (which stay at 22px) so it reads as the headline. */
+.sl-hero-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 10px 0 22px; }
+.sl-hero-tile {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px 18px;
+  box-shadow: 0 1px 3px rgba(16,24,40,.04);
+}
+.sl-hero-tile .sl-hero-val { font-size: 32px; font-weight: 800; line-height: 1.05; color: #1f2328; }
+.sl-hero-tile .sl-hero-lbl { font-size: 13px; color: #4b5563; margin-top: 6px; font-weight: 600; }
+.sl-hero-tile .sl-hero-sub { font-size: 12px; color: #9ca3af; margin-top: 2px; }
+.sl-hero-tile.good-cell { border-color: #86efac; background: #f0fdf4; }
+.sl-hero-tile.good-cell .sl-hero-val { color: #15803d; }
+.sl-hero-tile.bad-cell { border-color: #fca5a5; background: #fef2f2; }
+
+/* "Shift Leads Compared" cards — one per lead, a handful of key numbers, no scrolling
+   table. Reuses the same good/bad coloring convention as .sl-hero-tile / slGoodClass. */
+.sl-lead-compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.sl-lead-compare-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; }
+.sl-lead-compare-name { font-size: 15px; font-weight: 700; color: #1f2328; margin-bottom: 10px; }
+.sl-lead-compare-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(78px, 1fr)); gap: 10px; }
+.sl-lead-compare-metric { text-align: center; }
+.sl-lead-compare-val { font-size: 19px; font-weight: 800; color: #1f2328; line-height: 1.1; }
+.sl-lead-compare-val.good-cell { color: #15803d; }
+.sl-lead-compare-val.bad-cell { color: #b91c1c; }
+.sl-lead-compare-lbl { font-size: 11px; color: #6b7280; margin-top: 3px; }
+
+/* Clickable counts (hero tiles, comparison cards) that drill down to the tickets behind
+   the number via slShowRowsModal. */
+.sl-clickable-count { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: currentColor; text-underline-offset: 3px; }
+.sl-clickable-count:hover { color: #4f46e5; }
+
+/* Per-lead product-type mix chips shown under the "Shift Leads Compared" cards. */
+.sl-product-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #eef0f2; }
+.sl-product-chip { font-size: 11.5px; color: #4b5563; background: #f3f4f6; border-radius: 12px; padding: 3px 10px; }
+.sl-product-chip .sl-clickable-count { font-weight: 700; color: #1f2328; }
+.sl-hero-tile.bad-cell .sl-hero-val { color: #b91c1c; }
+
+/* Section headers for the dashboard's main blocks — a step up from .kpi-block-header so
+   the centerpiece chart and hero row visually outrank the diagnostic tables below them. */
+.sl-section-title { font-size: 17px; font-weight: 800; color: #1f2328; margin: 26px 0 12px; display: flex; align-items: baseline; gap: 10px; }
+.sl-section-title .kpi-block-hint { font-size: 12.5px; }
+.sl-section-title:first-child { margin-top: 4px; }
+
+/* Big centerpiece bar chart panel (cross-lead comparison, and each lead's own hero chart). */
+.sl-chart-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 20px 14px; margin-bottom: 22px; }
+.sl-chart-title { font-size: 14px; font-weight: 700; color: #1f2328; margin-bottom: 2px; }
+.sl-chart-hint { font-size: 12px; color: #6b7280; margin-bottom: 14px; }
+.sl-chart-plot { display: flex; gap: 22px; align-items: flex-end; overflow-x: auto; padding: 0 4px 4px; position: relative; }
+.sl-chart-plot.sl-chart-plot-grid {
+  background-image: repeating-linear-gradient(to top, #eef0f2 0, #eef0f2 1px, transparent 1px, transparent 25%);
+}
+.sl-chart-cluster { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.sl-chart-bars { display: flex; gap: 4px; align-items: flex-end; }
+.sl-chart-bar-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.sl-chart-bar-val { font-size: 13px; font-weight: 700; color: #374151; }
+.sl-chart-bar-fill { border-radius: 4px 4px 0 0; width: 100%; }
+.sl-chart-bar-week { font-size: 12.5px; color: #4b5563; white-space: nowrap; margin-top: 2px; font-weight: 600; }
+.sl-chart-legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 14px 4px 0; border-top: 1px solid #f3f4f6; margin-top: 14px; }
+.sl-chart-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #374151; font-weight: 600; }
+.sl-chart-legend-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+/* Per-lead dashboard card wrapping the whole tab-page for a Shift Lead. */
+.sl-lead-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 20px 22px; }
+.sl-lead-card-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.sl-lead-card-head h3 { font-size: 19px; font-weight: 800; margin: 0; color: #1f2328; }
+
+/* De-emphasized "diagnostic tools" section (Dev Board Tickets, Transfer check, First
+   Assignee) — visually secondary to the KPI/chart dashboard above it. */
+.sl-diagnostics-wrap { margin-top: 30px; padding-top: 6px; border-top: 2px dashed #e5e7eb; }
+.sl-diagnostics-label { font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: #9ca3af; margin: 6px 0 14px; }
+.sl-diagnostics-wrap .kpi-collapsible { opacity: .92; }
+.sl-diagnostics-wrap .kpi-block-header { font-size: 12.5px; padding: 7px 12px; }

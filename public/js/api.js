@@ -85,6 +85,25 @@ const Api = (function () {
     return asJson(res);
   }
 
+  // Background full-Dev-ticket crawl checking Shift Lead assignment on every real
+  // "transferred to Dev" event — see lib/devTransferCheck.js.
+  async function startDevTransferCheck() {
+    const res = await fetch('/api/nta/dev-transfer-check', { method: 'POST' });
+    return asJson(res);
+  }
+  async function getDevTransferCheckStatus() {
+    const res = await fetch('/api/nta/dev-transfer-check-status');
+    return asJson(res);
+  }
+  async function getDevTransferCheckResults() {
+    const res = await fetch('/api/nta/dev-transfer-check-results');
+    return asJson(res);
+  }
+  async function getDevFirstAssignees() {
+    const res = await fetch('/api/nta/dev-first-assignees');
+    return asJson(res);
+  }
+
   async function getConfig() {
     const res = await fetch('/api/config');
     return asJson(res);
@@ -114,5 +133,6 @@ const Api = (function () {
     getConfig, saveConfig, uploadExcel, getCurrentData,
     ntaSearch, ntaCount, ntaTestConnection, getNtaSpaces, getNtaUsers, getNtaStats,
     getNtaCurrent, syncNta, getNtaSyncStatus, getNtaIssue, getNtaIssuesBulk,
+    startDevTransferCheck, getDevTransferCheckStatus, getDevTransferCheckResults, getDevFirstAssignees,
   };
 })();

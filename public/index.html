@@ -173,30 +173,34 @@
 
 <!-- ============================== SHIFT LEAD ============================== -->
 <div class="tab-page" id="page-shiftlead">
-  <div class="kpi-summary-block" id="unassignedDevBlock">
-    <div class="kpi-block-header kpi-head-alert">
-      Dev Board Tickets <span class="kpi-block-hint">Live check against the last Neutara Ticketing sync — Neutara has no per-ticket change history yet (confirmed empty on every ticket checked), so this reflects the current snapshot only, filtered to tickets created OR resolved on the date below (includes closed tickets). Unassigned tickets are flagged in red.</span>
-    </div>
-    <div class="table-wrap">
-      <div class="table-toolbar" style="background:#fff;">
-        <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;">Created on
-          <input type="date" id="unassignedDevDateInput">
-        </label>
-        <button class="secondary" id="unassignedDevAllTimeBtn">All time</button>
-        <button class="secondary" id="refreshUnassignedDevBtn">Refresh</button>
-        <span id="unassignedDevStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+  <div class="sl-section-title">Overview <span class="kpi-block-hint">All 4 Shift Leads, current filter</span></div>
+  <div class="sl-hero-row" id="shiftLeadHeroRow"><div class="empty-state">Loading…</div></div>
+
+  <div class="sl-section-title">Tickets Received per Week, by Shift Lead</div>
+  <div class="sl-chart-panel" id="shiftLeadHeroChartPanel"><div class="empty-state">Loading…</div></div>
+
+  <details class="kpi-collapsible" id="shiftLeadComparisonBlock" open>
+    <summary>
+      <div class="kpi-block-header kpi-head-both">
+        Shift Leads Compared <span class="kpi-block-hint">Key numbers, all 4 shift leads, for the range below</span>
       </div>
-      <div id="unassignedDevSection"><div class="empty-state">Click Refresh, or switch to this tab, to check.</div></div>
+    </summary>
+    <div class="table-toolbar" style="background:#fff;">
+      <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;">Created from
+        <input type="date" id="shiftLeadCompareFromInput">
+      </label>
+      <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;">to
+        <input type="date" id="shiftLeadCompareToInput">
+      </label>
+      <button class="primary" id="shiftLeadCompareApplyBtn">Apply</button>
+      <button class="secondary" id="shiftLeadCompareAllTimeBtn">All time</button>
+      <span id="shiftLeadCompareStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
     </div>
-  </div>
-
-  <div class="kpi-summary-block" id="shiftLeadComparisonBlock">
-    <div class="kpi-block-header kpi-head-both">
-      Shift Leads Compared <span class="kpi-block-hint">Assignment performance across all 4 shift leads, from the shared assignment log below</span>
-    </div>
+    <div id="shiftLeadCompareOverview"></div>
     <div id="shiftLeadComparisonSection"><div class="empty-state">No assignments logged yet.</div></div>
-  </div>
+  </details>
 
+  <div class="sl-section-title">Per Shift Lead</div>
   <div class="tab-bar" id="shiftLeadTabBar">
     <button class="tab-btn active" data-subtab="shiftlead-abhinandan">Abhinandan Kumar</button>
     <button class="tab-btn" data-subtab="shiftlead-ravi">Ravi Srivastava</button>
@@ -207,6 +211,66 @@
   <div class="tab-page" id="shiftlead-ravi"></div>
   <div class="tab-page" id="shiftlead-pragati"></div>
   <div class="tab-page" id="shiftlead-akhila"></div>
+
+  <div class="sl-diagnostics-wrap">
+    <div class="sl-diagnostics-label">Diagnostic tools &amp; raw data (secondary)</div>
+
+    <div class="kpi-summary-block" id="devDailyCreatedBlock">
+      <div class="kpi-block-header kpi-head-both">
+        Tickets Created to Dev — By Day <span class="kpi-block-hint">Daily count of CF tickets newly created directly into the Dev department (last 14 days), for context alongside Shift Lead assignment activity.</span>
+      </div>
+      <div id="devDailyCreatedSection"><div class="empty-state">Loading…</div></div>
+    </div>
+
+    <details class="kpi-collapsible" id="unassignedDevBlock" style="display:none;">
+      <summary>
+        <div class="kpi-block-header kpi-head-alert">
+          Dev Board Tickets <span class="kpi-block-hint">Real assignment history per ticket, filtered to a date range. Unassigned tickets are flagged in red.</span>
+        </div>
+      </summary>
+      <div class="table-wrap">
+        <div class="table-toolbar" style="background:#fff;">
+          <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;">Created from
+            <input type="date" id="unassignedDevFromInput">
+          </label>
+          <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;">to
+            <input type="date" id="unassignedDevToInput">
+          </label>
+          <button class="secondary" id="unassignedDevAllTimeBtn">All time</button>
+          <button class="secondary" id="refreshUnassignedDevBtn">Refresh</button>
+          <span id="unassignedDevStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+        </div>
+        <div id="unassignedDevSection"><div class="empty-state">Click Refresh, or switch to this tab, to check.</div></div>
+      </div>
+    </details>
+
+    <details class="kpi-collapsible" id="devTransferCheckBlock">
+      <summary>
+        <div class="kpi-block-header kpi-head-alert">
+          Transferred to Dev — Shift Lead Assignment Check <span class="kpi-block-hint">Checks whether tickets moved into Dev were assigned by one of the 4 tracked Shift Leads.</span>
+        </div>
+      </summary>
+      <div class="table-toolbar" style="background:#fff;">
+        <button class="primary" id="devTransferCheckAllBtn">Check ALL Dev tickets</button>
+        <span class="kpi-block-hint">One API call per Dev ticket — fetches real history for every ticket currently in Dev. Takes a while.</span>
+        <span id="devTransferCheckAllStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+      </div>
+      <div id="devTransferCheckSection"><div class="empty-state">Refresh Dev Board Tickets above, or click "Check ALL Dev tickets" for a full scan.</div></div>
+    </details>
+
+    <details class="kpi-collapsible" id="devFirstAssigneeBlock" style="display:none;">
+      <summary>
+        <div class="kpi-block-header kpi-head-both">
+          First Assignee — All Dev Tickets <span class="kpi-block-hint">The very first real assignee ever recorded on each current Dev ticket.</span>
+        </div>
+      </summary>
+      <div class="table-toolbar" style="background:#fff;">
+        <button class="secondary" id="devFirstAssigneeLoadBtn">Load first-assignee report</button>
+        <span id="devFirstAssigneeStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+      </div>
+      <div id="devFirstAssigneeSection"><div class="empty-state">Click "Load first-assignee report" to populate.</div></div>
+    </details>
+  </div>
 </div>
 
 <!-- ============================== SETTINGS ============================== -->
