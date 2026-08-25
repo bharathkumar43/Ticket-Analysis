@@ -10,11 +10,15 @@
 // assignment (the Shift Lead, when it's an initial null -> engineer assignment); its
 // `createdAt` is the real assignment timestamp; its `oldValue` on a later re-assignment of the
 // same ticket is the previous assignee. See slParseAssignmentEvents.
+// `domain` is each Shift Lead's designated product ownership (per team spec, not inferred
+// from ticket mix) — the baseline that Cross-Assignment % below is measured against: any
+// ticket this lead assigned whose productType doesn't match their domain counts as a
+// cross-assignment (this lead handling/routing outside their own product area).
 const SHIFT_LEADS = [
-  { key: 'abhinandan', name: 'Abhinandan Kumar' },
-  { key: 'ravi', name: 'Ravi Srivastava' },
-  { key: 'pragati', name: 'Pragati Pandey' },
-  { key: 'akhila', name: 'Akhila Aenkoju' },
+  { key: 'abhinandan', name: 'Abhinandan Kumar', domain: 'Messaging' },
+  { key: 'ravi', name: 'Ravi Srivastava', domain: 'Content' },
+  { key: 'pragati', name: 'Pragati Pandey', domain: 'Messaging' },
+  { key: 'akhila', name: 'Akhila Aenkoju', domain: 'Messaging' },
 ];
 // The only engineers a Shift Lead may assign a ticket to, per team spec — used to render the
 // roster reference and to recognize real assignment events as in-scope.
@@ -58,6 +62,42 @@ function slMedian(nums) {
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
+// Normalizes a raw productType string (e.g. "Content Migration", "Email Migration",
+// "Message Migration") to one of the three domain buckets a Shift Lead's `domain` is set
+// to ('Content' | 'Email' | 'Messaging'), via substring match so minor label variants from
+// Neutara still classify correctly. Returns null for anything unrecognized (excluded from
+// cross-assignment math rather than miscounted).
+function slDomainForProductType(productType) {
+  const p = (productType || '').toLowerCase();
+  if (!p) return null;
+  if (p.includes('content')) return 'Content';
+  if (p.includes('email')) return 'Email';
+  if (p.includes('message') || p.includes('messaging')) return 'Messaging';
+  return null;
+}
+
+// Cross-Assignment % for one Shift Lead: of the tickets they assigned (assignedRows), how
+// many carry a productType outside their own designated `domain` — i.e. tickets that, per
+// team spec, should have been routed to the Content/Email/Messaging lead who actually owns
+// that domain. Tickets whose productType doesn't normalize to a known domain are excluded
+// from both the numerator and denominator (not counted as either in- or cross-domain).
+function slComputeCrossAssignment(assignedRows, leadDomain) {
+  if (!leadDomain) return { inDomain: 0, crossDomain: 0, classified: 0, crossPct: null, inDomainPct: null, crossRows: [], inDomainRows: [] };
+  const classifiedRows = assignedRows.filter(r => slDomainForProductType(r.productType));
+  const crossRows = classifiedRows.filter(r => slDomainForProductType(r.productType) !== leadDomain);
+  const inDomainRows = classifiedRows.filter(r => slDomainForProductType(r.productType) === leadDomain);
+  const classified = classifiedRows.length;
+  return {
+    inDomain: inDomainRows.length,
+    crossDomain: crossRows.length,
+    classified,
+    crossPct: classified ? slPct(crossRows.length, classified) : null,
+    inDomainPct: classified ? slPct(inDomainRows.length, classified) : null,
+    crossRows,
+    inDomainRows,
+  };
+}
+
 function slFindLead(displayNameOrEmail) {
   if (!displayNameOrEmail) return null;
   const needle = displayNameOrEmail.trim().toLowerCase();
@@ -157,10 +197,18 @@ function slComputeLeadStats(rows, leadName) {
   const avgMinutes = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
   const medianMinutes = slMedian(times);
   const withinSlaCount = times.filter(v => v <= SHIFT_LEAD_ASSIGN_SLA_MINUTES).length;
-  const slaBreachCount = times.length - withinSlaCount;
+  const assignSlaBreachCount = times.length - withinSlaCount; // assignment-time SLA (this lead's own speed), NOT the ticket's SLA
   const slaPct = times.length ? slPct(withinSlaCount, times.length) : null;
   const longestUnassignedMinutes = times.length ? Math.max(...times) : null;
   const reassignments = rows.filter(r => r.previousAssignee && r.previousAssignee.trim()).length;
+  // Ticket SLA Breaches: the ticket's own resolution-SLA-breach flag (Neutara's
+  // sla_breached, mapped through as row.slaBreached) — how many of this lead's tickets
+  // themselves breached SLA, independent of how fast the lead assigned them. Rows whose
+  // ticket never carried the flag (slaBreached === null/undefined, e.g. rows without the
+  // enriched fields) are excluded from both the numerator and denominator.
+  const slaTrackedRows = rows.filter(r => r.slaBreached === true || r.slaBreached === false);
+  const ticketSlaBreachCount = slaTrackedRows.filter(r => r.slaBreached === true).length;
+  const ticketSlaBreachPct = slaTrackedRows.length ? slPct(ticketSlaBreachCount, slaTrackedRows.length) : null;
   return {
     received: total,
     assigned: assignedRows.length,
@@ -170,10 +218,13 @@ function slComputeLeadStats(rows, leadName) {
     avgMinutes,
     medianMinutes,
     withinSlaCount,
-    slaBreachCount,
+    assignSlaBreachCount,
     slaPct,
     longestUnassignedMinutes,
     reassignments,
+    slaTrackedCount: slaTrackedRows.length,
+    ticketSlaBreachCount,
+    ticketSlaBreachPct,
   };
 }
 
@@ -189,7 +240,8 @@ function slScorecardHtml(leadName, stats) {
     { val: slFmtMinutes(stats.avgMinutes), lbl: 'Avg. Assignment Time', ok: avgOk },
     { val: slFmtMinutes(stats.medianMinutes), lbl: 'Median Assignment Time', ok: null },
     { val: stats.withinSlaCount, lbl: `Assigned ≤${SHIFT_LEAD_ASSIGN_SLA_MINUTES} min`, ok: null },
-    { val: stats.slaBreachCount, lbl: 'Assignment SLA Breaches', ok: stats.slaBreachCount === 0 ? true : stats.slaBreachCount > 0 ? false : null },
+    { val: stats.assignSlaBreachCount, lbl: 'Assignment SLA Breaches', ok: stats.assignSlaBreachCount === 0 ? true : stats.assignSlaBreachCount > 0 ? false : null },
+    { val: stats.ticketSlaBreachCount, lbl: 'Ticket SLA Breaches', ok: stats.slaTrackedCount === 0 ? null : stats.ticketSlaBreachCount === 0 ? true : false },
     { val: slFmtPct(stats.slaPct), lbl: 'Assignment SLA %', ok: slaOk },
     { val: slFmtMinutes(stats.longestUnassignedMinutes), lbl: 'Longest Unassigned Ticket', ok: null },
     { val: stats.reassignments, lbl: 'Reassignments', ok: stats.reassignments === 0 ? true : null },
@@ -320,6 +372,11 @@ async function slFetchAssignmentRowsForTickets(cfKeys) {
           resolvedAt: issue.resolvedAt || null,
           isResolved: !!issue.resolvedAt,
           resolutionMinutes: issue.resolvedAt ? slMinutesBetween(issue.createdAt, issue.resolvedAt) : null,
+          // Ticket's own resolution-SLA-breach flag, straight from Neutara's raw field (this
+          // fetch path returns the RAW NTA issue shape, not the ntaMapper-mapped one — the
+          // raw field is `sla_breached`, mapped to `rb` only once ntaMapper.mapIssue runs).
+          // NOT the assignment-time SLA computed elsewhere in this file. null when untracked.
+          slaBreached: typeof issue.sla_breached === 'boolean' ? issue.sla_breached : null,
         }))
       : [];
     rawByKey[key] = issue || null;
@@ -346,6 +403,7 @@ function slFirstAssigneeToRow(r) {
     resolvedAt: r.resolvedAt,
     isResolved: r.isResolved,
     resolutionMinutes: r.resolutionMinutes,
+    slaBreached: r.slaBreached,
   };
 }
 
@@ -985,7 +1043,8 @@ function slCompareCardData() {
     const productTypeCounts = {};
     assignedRows.forEach(r => { const p = r.productType || 'Unknown'; productTypeCounts[p] = (productTypeCounts[p] || 0) + 1; });
     const productTypeEntries = Object.entries(productTypeCounts).sort((a, b) => b[1] - a[1]);
-    return { lead, rows, stats, assignedRows, unassignedRows, productTypeEntries };
+    const crossAssign = slComputeCrossAssignment(assignedRows, lead.domain);
+    return { lead, rows, stats, assignedRows, unassignedRows, productTypeEntries, crossAssign };
   });
 }
 
@@ -993,7 +1052,7 @@ function buildShiftLeadComparisonTable() {
   const el = document.getElementById('shiftLeadComparisonSection');
   if (!el) return;
   const cardData = slCompareCardData();
-  const cardsHtml = cardData.map(({ lead, rows, stats, assignedRows, unassignedRows, productTypeEntries }) => {
+  const cardsHtml = cardData.map(({ lead, rows, stats, assignedRows, unassignedRows, productTypeEntries, crossAssign }) => {
     const slaOk = stats.slaPct === null ? null : stats.slaPct >= 90;
     // Product-type mix of what this lead actually assigned — distinct-type count as a
     // clickable KPI (opens the full list), plus small chips below showing each type's count.
@@ -1003,15 +1062,23 @@ function buildShiftLeadComparisonTable() {
           return `<span class="sl-product-chip">${slClickableCount(c, typeRows, `${lead.name} — ${p}`)} ${escapeHtml(p)}</span>`;
         }).join('')
       : '<span class="kpi-block-hint">No data</span>';
+    const crossOk = crossAssign.crossPct === null ? null : crossAssign.crossDomain === 0;
+    const crossValHtml = !lead.domain
+      ? '<span class="kpi-block-hint">N/A</span>'
+      : crossAssign.classified === 0
+      ? '<span class="kpi-block-hint">No data</span>'
+      : `${slClickableCount(crossAssign.crossDomain, crossAssign.crossRows, `${lead.name} — Cross-Assigned (outside ${lead.domain})`)} (${slFmtPct(crossAssign.crossPct)})`;
     return `<div class="sl-lead-compare-card">
-      <div class="sl-lead-compare-name">${escapeHtml(lead.name)}</div>
+      <div class="sl-lead-compare-name">${escapeHtml(lead.name)}${lead.domain ? ` <span class="kpi-block-hint">(${escapeHtml(lead.domain)})</span>` : ''}</div>
       <div class="sl-lead-compare-metrics">
         <div class="sl-lead-compare-metric"><div class="sl-lead-compare-val">${slClickableCount(stats.received, rows, `${lead.name} — Received`)}</div><div class="sl-lead-compare-lbl">Received</div></div>
         <div class="sl-lead-compare-metric"><div class="sl-lead-compare-val">${slClickableCount(stats.assigned, assignedRows, `${lead.name} — Assigned`)}</div><div class="sl-lead-compare-lbl">Assigned</div></div>
         <div class="sl-lead-compare-metric"><div class="sl-lead-compare-val ${slGoodClass(stats.stillUnassigned === 0 ? true : stats.stillUnassigned > 0 ? false : null)}">${slClickableCount(stats.stillUnassigned, unassignedRows, `${lead.name} — Still Unassigned`)}</div><div class="sl-lead-compare-lbl">Still Unassigned</div></div>
         <div class="sl-lead-compare-metric"><div class="sl-lead-compare-val">${slFmtMinutes(stats.avgMinutes)}</div><div class="sl-lead-compare-lbl">Avg. Assign Time</div></div>
         <div class="sl-lead-compare-metric"><div class="sl-lead-compare-val ${slGoodClass(slaOk)}">${slFmtPct(stats.slaPct)}</div><div class="sl-lead-compare-lbl">Assignment SLA %</div></div>
+        <div class="sl-lead-compare-metric"><div class="sl-lead-compare-val ${slGoodClass(stats.slaTrackedCount === 0 ? null : stats.ticketSlaBreachCount === 0 ? true : false)}">${stats.slaTrackedCount === 0 ? '<span class="kpi-block-hint">N/A</span>' : slClickableCount(stats.ticketSlaBreachCount, rows.filter(r => r.slaBreached === true), `${lead.name} — Ticket SLA Breaches`)}</div><div class="sl-lead-compare-lbl">Ticket SLA Breaches</div></div>
         <div class="sl-lead-compare-metric"><div class="sl-lead-compare-val">${productTypeEntries.length}</div><div class="sl-lead-compare-lbl">Product Types</div></div>
+        <div class="sl-lead-compare-metric"><div class="sl-lead-compare-val ${slGoodClass(crossOk)}">${crossValHtml}</div><div class="sl-lead-compare-lbl">Cross-Assigned</div></div>
       </div>
       <div class="sl-product-chip-row">${productTypeChipsHtml}</div>
     </div>`;
@@ -1032,18 +1099,24 @@ function buildShiftLeadComparisonTable() {
 function slDownloadCompareCsv() {
   const cardData = slCompareCardData();
   const allProductTypes = Array.from(new Set(cardData.flatMap(d => d.productTypeEntries.map(([p]) => p)))).sort();
-  const header = ['Shift Lead', 'Received', 'Assigned', 'Still Unassigned', 'Avg Assign Time (min)', 'Assignment SLA %', 'Distinct Product Types', ...allProductTypes.map(p => `Product Type: ${p}`)];
+  const header = ['Shift Lead', 'Domain', 'Received', 'Assigned', 'Still Unassigned', 'Avg Assign Time (min)', 'Assignment SLA %', 'Ticket SLA Breaches', 'Ticket SLA Breach %', 'Distinct Product Types', 'Cross-Assigned Tickets', 'Cross-Assigned %', 'Not Cross-Assigned %', ...allProductTypes.map(p => `Product Type: ${p}`)];
   const lines = [header.map(slCsvField).join(',')];
-  cardData.forEach(({ lead, stats, productTypeEntries }) => {
+  cardData.forEach(({ lead, stats, productTypeEntries, crossAssign }) => {
     const countByType = Object.fromEntries(productTypeEntries);
     lines.push([
       lead.name,
+      lead.domain || 'N/A',
       stats.received,
       stats.assigned,
       stats.stillUnassigned,
       stats.avgMinutes === null ? '' : Math.round(stats.avgMinutes),
       stats.slaPct === null ? '' : stats.slaPct.toFixed(1),
+      stats.slaTrackedCount ? stats.ticketSlaBreachCount : 'N/A',
+      stats.ticketSlaBreachPct === null ? 'N/A' : stats.ticketSlaBreachPct.toFixed(1),
       productTypeEntries.length,
+      lead.domain ? crossAssign.crossDomain : 'N/A',
+      lead.domain && crossAssign.crossPct !== null ? crossAssign.crossPct.toFixed(1) : 'N/A',
+      lead.domain && crossAssign.inDomainPct !== null ? crossAssign.inDomainPct.toFixed(1) : 'N/A',
       ...allProductTypes.map(p => countByType[p] || 0),
     ].map(slCsvField).join(','));
   });
@@ -1064,7 +1137,7 @@ function slDownloadCompareImage() {
   const cardData = slCompareCardData();
   const mainSection = {
     heading: 'Key Numbers',
-    columns: ['Shift Lead', 'Received', 'Assigned', 'Still Unassigned', 'Avg Assign', 'SLA %', 'Product Types'],
+    columns: ['Shift Lead', 'Received', 'Assigned', 'Still Unassigned', 'Avg Assign', 'SLA %', 'Ticket SLA Breaches', 'Product Types'],
     rows: cardData.map(({ lead, stats, productTypeEntries }) => [
       lead.name,
       stats.received,
@@ -1072,6 +1145,7 @@ function slDownloadCompareImage() {
       stats.stillUnassigned,
       slFmtMinutes(stats.avgMinutes),
       slFmtPct(stats.slaPct),
+      stats.slaTrackedCount ? `${stats.ticketSlaBreachCount} (${slFmtPct(stats.ticketSlaBreachPct)})` : 'N/A',
       productTypeEntries.length,
     ]),
   };
@@ -1084,7 +1158,24 @@ function slDownloadCompareImage() {
       return [lead.name, ...allProductTypes.map(p => countByType[p] || 0)];
     }),
   } : null;
-  slDownloadImageReport('shift-leads-compared', 'Shift Leads Compared', productSection ? [mainSection, productSection] : [mainSection]);
+  // Cross-Assignment section: for each lead with a designated domain, how many of their
+  // assigned tickets fall outside that domain (should have been routed to the Content/
+  // Email/Messaging lead who owns it), as a count and %, plus the inverse "stayed in
+  // domain" % so a 0% cross-assign rate reads as compliant rather than as missing data.
+  const crossSection = {
+    heading: 'Cross-Assignment (vs. designated domain)',
+    columns: ['Shift Lead', 'Domain', 'Cross-Assigned', 'Cross-Assigned %', 'Not Cross-Assigned %'],
+    rows: cardData.map(({ lead, crossAssign }) => lead.domain
+      ? [
+          lead.name,
+          lead.domain,
+          crossAssign.classified ? crossAssign.crossDomain : '—',
+          crossAssign.crossPct === null ? 'N/A' : slFmtPct(crossAssign.crossPct),
+          crossAssign.inDomainPct === null ? 'N/A' : slFmtPct(crossAssign.inDomainPct),
+        ]
+      : [lead.name, 'N/A', 'N/A', 'N/A', 'N/A']),
+  };
+  slDownloadImageReport('shift-leads-compared', 'Shift Leads Compared', productSection ? [mainSection, productSection, crossSection] : [mainSection, crossSection]);
 }
 
 function slRebuildAllPanels() {
