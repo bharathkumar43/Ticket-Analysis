@@ -1,0 +1,109 @@
+# GStack workflow: deployment
+# Standalone pipeline for deploying the Ticket Hygiene Dashboard, independent of whether a
+# feature/bug-fix workflow just ran (e.g. "redeploy with the latest data/ backup restored", or
+# a manual deploy request). See CLAUDE.md's "Workflow Selection" section.
+#
+# Reality check for this repo, stated up front: there is currently ONE documented deployment
+# shape (Docker + docker-compose, run manually on a host you control — see README.md's
+# "Running with Docker" section), and NO CI/CD pipeline. This workflow's "staging" phase
+# below assumes you have (or are willing to stand up) a second, separate host/container for
+# pre-production verification — if you don't, say so and this workflow collapses to
+# verification-checklist -> production, with the user explicitly accepting the higher risk of
+# skipping a staging step.
+
+name: deployment
+description: >
+  Pre-deployment checklist -> staging (if available) -> verification -> production, with
+  explicit rollback criteria and a post-deploy monitoring window.
+
+phases:
+  - phase: pre-deployment-checklist
+    agent: gstack-devops-engineer
+    description: |
+      Before touching anything, confirm:
+      - [ ] What's being deployed: current `main` HEAD, a specific commit/tag, or a branch —
+            ask the user to confirm exactly which.
+      - [ ] `npm test` passes on what's being deployed.
+      - [ ] No uncommitted changes are being silently included — `git status` clean, or the
+            user has explicitly confirmed they want uncommitted changes deployed (unusual;
+            confirm deliberately if so).
+      - [ ] `data/` on the target host is not about to be overwritten — this app's `data/`
+            (NTA config + synced ticket cache) is bind-mounted specifically so it survives a
+            redeploy (see README.md); verify the deploy command still bind-mounts the existing
+            `./data` directory rather than starting fresh.
+      - [ ] Any new environment variables the deployed code needs (beyond `PORT`) are set on
+            the target host.
+      - [ ] Health check endpoint (`/api/health`) responds correctly on the current
+            (pre-deploy) running instance, as a baseline.
+    gate: User confirms the checklist above before proceeding.
+
+  - phase: staging
+    agent: gstack-devops-engineer
+    description: >
+      Deploy to a staging/pre-production target first, if one exists for this app. If no
+      staging environment exists (common for a small internal tool like this one), say so
+      explicitly and ask the user whether to proceed straight to production verification or
+      set one up first — do not silently skip this phase without flagging it.
+    condition: a staging environment exists or the user chooses to set one up
+
+  - phase: verification
+    agent: gstack-qa-engineer
+    description: >
+      On whichever environment was just deployed to (staging, or production if staging was
+      skipped): confirm `docker compose up -d --build` succeeded, the container reports
+      healthy (`/api/health`), the app is reachable on the configured port, Settings shows the
+      expected NTA connection state (credentials picked up from the persisted `data/` volume,
+      not requiring re-entry — see README.md's documented expectation), and a spot-check of
+      one or two key tabs (Dashboard, Shift Lead) renders real data, not empty/error states.
+    depends_on: [pre-deployment-checklist, staging]
+
+  - phase: production-gate
+    description: |
+      ### Production Deploy Decision (requires user confirmation)
+      - Gate 1 — Ask user: proceed to production deploy, given verification results above?
+        - If no: stop here — staging/verification stands, nothing further happens
+      - Gate 2 — Ask user: confirm exact target (host, and that this is really the production
+        instance, not another staging/test host) — never assume based on naming alone.
+      - IMPORTANT: state plainly that this repo has no CI/CD — this deploy is a manual command
+        being run now, not something that will happen automatically on a future push. If
+        production deploy is being done as a direct follow-up to a merge, that merge and this
+        deploy are still two separate actions requiring two separate confirmations.
+    depends_on: verification
+    gate: Both gates above must be explicitly confirmed before the next phase runs.
+
+  - phase: production-deploy
+    agent: gstack-devops-engineer
+    description: >
+      Execute the deploy against the confirmed production target. Use the documented command
+      (`docker compose up -d --build`, or the plain-docker equivalent from README.md) with the
+      existing `./data` bind mount preserved. Report the exact command run.
+    condition: production-gate confirmed
+    depends_on: production-gate
+
+  - phase: post-deploy-monitoring
+    description: |
+      Immediately after production-deploy:
+      - [ ] `/api/health` returns healthy.
+      - [ ] The app is reachable on the expected port from outside the container.
+      - [ ] Settings/Dashboard show the persisted NTA credentials and last sync state came back
+            correctly (confirms the `data/` volume mount worked, not a fresh/empty state).
+      - [ ] Watch for the next scheduled background NTA sync (default every 6 hours, or trigger
+            "Sync now" manually) to confirm sync still works post-deploy.
+      Recommended monitoring window: check back within 15–30 minutes of deploy, and again
+      after the next background sync completes, before considering the deploy fully verified.
+    depends_on: production-deploy
+
+  - phase: rollback-criteria
+    description: |
+      Roll back immediately if, after production-deploy: `/api/health` fails or the container
+      won't start; the app is unreachable; `data/` came back empty/reset (credentials or
+      synced tickets missing) instead of picking up the persisted volume; or a spot-checked
+      tab shows an error/crash where it worked pre-deploy.
+      Do NOT roll back for: a slow first page load while assets warm up, or the background
+      sync simply not having run yet (it's on a 6-hour schedule — trigger "Sync now" manually
+      to check sync itself still works, rather than treating an empty pre-first-sync dashboard
+      as a failure).
+      To roll back: redeploy the previous known-good commit/tag using the same command,
+      confirming with the user first per the same gate pattern as any other deploy — a rollback
+      is still a deploy and needs its own target confirmation, even under time pressure.
+    depends_on: post-deploy-monitoring

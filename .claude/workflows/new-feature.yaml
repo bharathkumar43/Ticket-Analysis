@@ -1,0 +1,132 @@
+# GStack workflow: new-feature
+# Full pipeline for any new feature in the Ticket Hygiene Dashboard. See CLAUDE.md's
+# "Workflow Selection" section for when this workflow applies by default.
+#
+# This file is a readable pipeline definition, not an executable script — Claude Code follows
+# it phase by phase, invoking the named agent (via the Agent tool, subagent_type matching each
+# agent file's `name:` frontmatter) for each step, and stopping at every gate for explicit
+# user confirmation before proceeding.
+
+name: new-feature
+description: >
+  Design -> implement -> test -> review -> document -> commit/release gate -> deploy prep ->
+  deploy, for a new feature. Every phase's output feeds the next; gates require explicit user
+  confirmation before proceeding.
+
+phases:
+  - phase: requirements
+    description: >
+      Confirm what's actually being asked before designing anything. If the request is
+      ambiguous (which tab, which metric, what the exact behavior should be for edge cases),
+      ask the user directly rather than letting the architect guess. Skip this phase only if
+      the request is already fully unambiguous.
+
+  - phase: architecture
+    agent: gstack-architect
+    description: >
+      Produce the design doc (data shape, endpoints, frontend plan, sequence, open questions —
+      see architect.md for the exact format). If the design doc has open questions, resolve
+      them with the user before proceeding — do not let backend/frontend start on an
+      unresolved design.
+    gate: >
+      User approves the design doc (or requests changes to it) before implementation starts.
+      This is a real gate for any non-trivial feature — skipping it is how mismatched
+      backend/frontend implementations happen.
+
+  - phase: backend
+    agent: gstack-backend-engineer
+    description: >
+      Implement server-side changes from the approved design: routes/, lib/, shared/, plus
+      tests under test/. Runs node --check on every touched file and npm test before
+      hand-off.
+    depends_on: architecture
+
+  - phase: frontend
+    agent: gstack-frontend-engineer
+    description: >
+      Implement UI changes from the approved design: public/js/, public/css/,
+      public/index.html. May run in parallel with backend if the design doc's "sequence of
+      changes" section says the frontend work doesn't depend on backend landing first;
+      otherwise waits for backend's hand-off (new endpoint, new field, etc.).
+    depends_on: architecture
+
+  - phase: qa
+    agent: gstack-qa-engineer
+    description: >
+      Test the completed feature end-to-end against the real running app where possible (see
+      qa-engineer.md's testing approach for this app — no automated frontend harness, so
+      manual/live verification is primary). Files bug reports; does not fix them.
+    depends_on: [backend, frontend]
+
+  - phase: bugfix-loop
+    description: >
+      If qa-engineer reports Critical or High severity bugs, route them back to
+      backend-engineer/frontend-engineer (whichever owns the affected file) and re-run the qa
+      phase after the fix. Repeat until no Critical/High bugs remain. Medium/Low findings can
+      be noted for the user to triage rather than looping indefinitely on them.
+    condition: qa found Critical or High severity bugs
+
+  - phase: security
+    agent: gstack-security-reviewer
+    description: >
+      Audit the completed change per security-reviewer.md's checklist (API key exposure,
+      requireConfig usage, data/ hygiene, XSS via ticket content, upload validation). Any
+      Critical finding blocks the next phase until resolved.
+    depends_on: qa
+    gate: >
+      Any Critical security finding must be fixed and re-reviewed before proceeding — this is
+      a hard stop, not advisory.
+
+  - phase: code-review
+    agent: gstack-code-reviewer
+    description: >
+      Review for correctness, pattern consistency, DRY, multi-call-site consistency, and test
+      coverage per code-reviewer.md. Produces Approve or Request Changes.
+    depends_on: security
+    gate: >
+      Request Changes findings must be addressed (or explicitly accepted by the user as
+      out-of-scope) before proceeding.
+
+  - phase: documentation
+    agent: gstack-documentation-engineer
+    description: >
+      Update README.md (and CLAUDE.md only if a structural/standards change was made) to
+      reflect the shipped feature, once it has Approve from code-review.
+    depends_on: code-review
+
+  - phase: commit-release-decision
+    description: |
+      ### Commit & Release Decision (requires user confirmation)
+      - Gate 1 — Ask user: commit and push? (never auto-commit)
+        - If no: stop, nothing is saved
+        - If yes: stage only relevant files, commit with a conventional message
+          (feat:/fix:/chore:), push to the working branch
+      - Gate 2 — Ask user: which branch? current branch, `main`, `joshi`, or a new branch —
+        never assume. If the change is non-trivial and currently on `main`, recommend a new
+        branch rather than committing straight to `main`, but let the user decide.
+      - Gate 3 — Ask user: deploy now, or stop here (commit only)?
+        - If no deploy: workflow ends after commit — do not ask about environments
+      - Gate 4 (only if Gate 3 = yes) — Ask user: target environment. Per README.md, this app
+        currently has one documented deployment shape (Docker/compose on a host you control) —
+        confirm the actual target host/environment with the user rather than assuming.
+      - IMPORTANT: this repo has **no CI/CD pipeline today** — pushing to `main` does **not**
+        auto-deploy anything (see CLAUDE.md). State this plainly at Gate 2/3 so the user knows
+        merging and deploying are two separate, sequential actions here, not one. If that ever
+        changes (a CI workflow is added), this file must be updated to say so and to treat
+        merge-to-main as requiring the same explicit production approval as a deploy.
+    depends_on: documentation
+
+  - phase: deploy-prep
+    agent: gstack-devops-engineer
+    description: >
+      Only runs if Gate 3 above was "yes". Prepares/verifies Docker config per
+      devops-engineer.md — does not deploy yet, just gets the build ready and verified.
+    condition: commit-release-decision Gate 3 = yes
+
+  - phase: deploy
+    agent: gstack-devops-engineer
+    description: >
+      Executes the actual deploy against the confirmed target from Gate 4. Reports exactly
+      what command was run and the post-deploy health check result.
+    condition: commit-release-decision Gate 4 confirmed
+    depends_on: deploy-prep

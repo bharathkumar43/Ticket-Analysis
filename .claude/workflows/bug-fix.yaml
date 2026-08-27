@@ -1,0 +1,124 @@
+# GStack workflow: bug-fix
+# Same shape as new-feature minus the design phase, plus an explicit rollback-vs-fix-forward
+# decision up front. See CLAUDE.md's "Workflow Selection" section for when this applies.
+
+name: bug-fix
+description: >
+  Triage (rollback vs. fix-forward) -> implement fix -> test -> review -> document ->
+  commit/release gate -> deploy prep -> deploy.
+
+phases:
+  - phase: triage
+    description: |
+      Before writing any fix, decide: **rollback immediately, or fix forward?**
+      - Rollback immediately if: the bug is a regression (worked before a recent, identifiable
+        commit), it's actively producing wrong data users are seeing right now (e.g. a metric
+        like SLA %/Avg Assign Time showing an incorrect number that's being reported up), and
+        a known-good prior commit exists to revert to. Ask the user to confirm the rollback
+        target commit/branch before doing it — never revert unilaterally.
+      - Fix forward otherwise (bug has always existed, no clean revert point, or reverting
+        would lose other unrelated changes made since).
+      This is a real decision, not a formality — for a data-correctness bug already visible to
+      users (e.g. a wrong Avg Assign Time being read off a live panel), rollback is very often
+      faster and safer than an in-place fix under time pressure. State which path was chosen
+      and why when reporting back.
+    gate: User confirms rollback vs. fix-forward before proceeding.
+
+  - phase: rollback
+    description: >
+      Only if triage chose rollback. Revert to the confirmed known-good commit/branch. This
+      itself goes through the same commit-release-decision gate below (a revert is still a
+      change that needs explicit commit/push/deploy confirmation) — do not treat "it's just a
+      revert" as license to skip the gates.
+    condition: triage decided rollback
+
+  - phase: root-cause
+    description: >
+      For fix-forward: identify the actual root cause, not just the symptom. This codebase has
+      specific known bug shapes worth checking first — conflated Assignment-SLA vs. Ticket-SLA
+      (assignSlaBreachCount vs. ticketSlaBreachCount in shiftlead.js), raw-vs-mapped NTA field
+      name mixups (sla_breached vs. rb), timezone/shift-window off-by-ones
+      (slIsInShiftWindowIst), or a metric updated in one render location but not the others it
+      also appears in (lead panel / compare view / CSV / image export). Check whether the bug
+      matches one of these shapes before assuming it's something novel.
+    condition: triage decided fix-forward
+
+  - phase: fix
+    agent: gstack-backend-engineer  # or gstack-frontend-engineer, whichever owns the affected file(s)
+    description: >
+      Implement the fix. If the bug spans both a lib/routes file and a public/js file (e.g. a
+      field renamed in the mapper without updating the frontend reader), both
+      backend-engineer and frontend-engineer may be needed — coordinate via the root-cause
+      phase's findings on which files are actually affected.
+    condition: triage decided fix-forward
+    depends_on: root-cause
+
+  - phase: qa
+    agent: gstack-qa-engineer
+    description: >
+      Verify the fix resolves the original bug (reproduce the original repro steps and confirm
+      they no longer fail) AND check for regressions in anything that reads the same data/
+      function (per qa-engineer.md's cross-metric-consistency checks — a fix to one render
+      location's number is incomplete if the others still show the old wrong value).
+    depends_on: [fix]
+
+  - phase: bugfix-loop
+    description: >
+      If qa-engineer finds the original bug isn't actually resolved, or finds a new
+      regression, route back to the fix phase. Repeat until qa confirms the fix and no new
+      Critical/High regressions.
+    condition: qa found the original bug still present or a new Critical/High regression
+
+  - phase: security
+    agent: gstack-security-reviewer
+    description: >
+      Only run if the fix touches config/credential handling, upload parsing, or any
+      ticket-content render path (see security-reviewer.md checklist) — skip for a purely
+      cosmetic or math-only fix that doesn't touch those areas, to keep bug-fix turnaround
+      fast. State explicitly whether this phase ran or was skipped, and why.
+    condition: fix touches security-relevant surface (see description)
+
+  - phase: code-review
+    agent: gstack-code-reviewer
+    description: Review the fix for correctness and that it doesn't reintroduce the pattern that caused the bug.
+    depends_on: qa
+
+  - phase: documentation
+    agent: gstack-documentation-engineer
+    description: >
+      Update README.md only if the fix changes documented behavior (e.g. corrects a previously
+      wrong statement, or changes setup/usage instructions). Most bug fixes don't need a docs
+      update — skip if nothing documented actually changed.
+    condition: fix changes documented behavior
+    depends_on: code-review
+
+  - phase: commit-release-decision
+    description: |
+      ### Commit & Release Decision (requires user confirmation)
+      - Gate 1 — Ask user: commit and push? (never auto-commit)
+        - If no: stop, nothing is saved
+        - If yes: stage only relevant files, commit with a conventional message (fix:), push
+          to the working branch
+      - Gate 2 — Ask user: which branch? current branch, `main`, `joshi`, or a new branch —
+        never assume. For a rollback or a Critical-severity fix, ask whether it should go
+        straight to `main` given urgency, but still get explicit confirmation rather than
+        assuming urgency implies permission.
+      - Gate 3 — Ask user: deploy now, or stop here (commit only)?
+        - If no deploy: workflow ends after commit — do not ask about environments
+      - Gate 4 (only if Gate 3 = yes) — Ask user: target environment/host, per README.md's
+        documented Docker/compose deployment shape.
+      - IMPORTANT: no CI/CD pipeline exists in this repo today — merging to `main` does not
+        auto-deploy (see CLAUDE.md). State this plainly, especially for an urgent
+        rollback/fix, so the user knows the deploy step is still separate and manual.
+    depends_on: [code-review, documentation]
+
+  - phase: deploy-prep
+    agent: gstack-devops-engineer
+    description: Prepares/verifies Docker config, only if Gate 3 above was "yes".
+    condition: commit-release-decision Gate 3 = yes
+
+  - phase: deploy
+    agent: gstack-devops-engineer
+    description: Executes the deploy against the confirmed target from Gate 4.
+    condition: commit-release-decision Gate 4 confirmed
+    depends_on: deploy-prep

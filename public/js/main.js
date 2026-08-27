@@ -28,29 +28,43 @@ async function loadTabIfNeeded(tabId, force) {
       break;
     case 'page-shiftlead':
       await loadUnassignedDevSection();
+      // Overview hero row defaults to the full all-time Dev dataset from Neutara (not
+      // scoped to whatever narrow range the "Dev Board Tickets" section above just loaded)
+      // so it isn't sitting empty/local until someone manually clicks "All time" there.
+      if (typeof slOnHeroRangeChange === 'function') await slOnHeroRangeChange();
       break;
     default:
       break;
   }
 }
 
+// Switches to a top-level tab (page-dashboard, page-shiftlead, page-settings, ...) the same
+// way clicking its button does — factored out so other tabs can jump here programmatically
+// (e.g. Settings' Shift Lead section jumping to a lead's panel on the Shift Lead tab) without
+// duplicating this logic or simulating a click.
+function switchTopTab(tabId) {
+  const btn = document.querySelector(`body > .tab-bar > .tab-btn[data-tab="${tabId}"]`);
+  const page = document.getElementById(tabId);
+  if (!btn || !page) return;
+  document.querySelectorAll('body > .tab-bar > .tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('body > .tab-page').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  page.classList.add('active');
+  loadTabIfNeeded(tabId, false);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   setDateInputs();
 
   document.querySelectorAll('body > .tab-bar > .tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('body > .tab-bar > .tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('body > .tab-page').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      const page = document.getElementById(btn.dataset.tab);
-      page.classList.add('active');
-      loadTabIfNeeded(btn.dataset.tab, false);
-    });
+    btn.addEventListener('click', () => switchTopTab(btn.dataset.tab));
   });
 
+  // shiftLeadTabBar is NOT wired here — shiftlead.js owns it and rebuilds it dynamically
+  // (its buttons come from the editable Shift Leads Roster, not a fixed set in this HTML), so
+  // it wires its own click listeners each time it rebuilds. See slBuildShiftLeadTabBar.
   [
     { barId: 'leaderMetricsTabBar', pageId: 'page-qateam' },
-    { barId: 'shiftLeadTabBar', pageId: 'page-shiftlead' },
   ].forEach(({ barId, pageId }) => {
     document.querySelectorAll(`#${barId} > .tab-btn`).forEach(btn => {
       btn.addEventListener('click', () => {

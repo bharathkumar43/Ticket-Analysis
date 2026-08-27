@@ -174,12 +174,29 @@
 <!-- ============================== SHIFT LEAD ============================== -->
 <div class="tab-page" id="page-shiftlead">
   <div class="sl-section-title">Overview <span class="kpi-block-hint">All 4 Shift Leads, current filter</span></div>
+  <div class="table-toolbar" style="background:#fff;">
+    <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;">Created from
+      <input type="date" id="shiftLeadHeroFromInput">
+    </label>
+    <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;">to
+      <input type="date" id="shiftLeadHeroToInput">
+    </label>
+    <button class="primary" id="shiftLeadHeroApplyBtn">Apply</button>
+    <button class="secondary" id="shiftLeadHeroAllTimeBtn">All time</button>
+    <span id="shiftLeadHeroStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+  </div>
   <div class="sl-hero-row" id="shiftLeadHeroRow"><div class="empty-state">Loading…</div></div>
 
-  <div class="sl-section-title">Tickets Received per Week, by Shift Lead</div>
-  <div class="sl-chart-panel" id="shiftLeadHeroChartPanel"><div class="empty-state">Loading…</div></div>
+  <details class="kpi-collapsible">
+    <summary>
+      <div class="kpi-block-header kpi-head-both">
+        Tickets Received per Week, by Shift Lead
+      </div>
+    </summary>
+    <div class="sl-chart-panel" id="shiftLeadHeroChartPanel"><div class="empty-state">Loading…</div></div>
+  </details>
 
-  <details class="kpi-collapsible" id="shiftLeadComparisonBlock" open>
+  <details class="kpi-collapsible" id="shiftLeadComparisonBlock">
     <summary>
       <div class="kpi-block-header kpi-head-both">
         Shift Leads Compared <span class="kpi-block-hint">Key numbers, all 4 shift leads, for the range below</span>
@@ -200,17 +217,11 @@
     <div id="shiftLeadComparisonSection"><div class="empty-state">No assignments logged yet.</div></div>
   </details>
 
+  <div class="kpi-block-hint" style="margin:4px 0 14px;">To manage the Engineer Roster or the Shift Leads (add, rename, remove, set shift window), go to <b>Settings → Shift Leads</b>.</div>
+
   <div class="sl-section-title">Per Shift Lead</div>
-  <div class="tab-bar" id="shiftLeadTabBar">
-    <button class="tab-btn active" data-subtab="shiftlead-abhinandan">Abhinandan Kumar</button>
-    <button class="tab-btn" data-subtab="shiftlead-ravi">Ravi Srivastava</button>
-    <button class="tab-btn" data-subtab="shiftlead-pragati">Pragati Pandey</button>
-    <button class="tab-btn" data-subtab="shiftlead-akhila">Akhila Aenkoju</button>
-  </div>
-  <div class="tab-page active" id="shiftlead-abhinandan"></div>
-  <div class="tab-page" id="shiftlead-ravi"></div>
-  <div class="tab-page" id="shiftlead-pragati"></div>
-  <div class="tab-page" id="shiftlead-akhila"></div>
+  <div class="tab-bar" id="shiftLeadTabBar"></div>
+  <div id="shiftLeadTabPages"></div>
 
   <div class="sl-diagnostics-wrap">
     <div class="sl-diagnostics-label">Diagnostic tools &amp; raw data (secondary)</div>
@@ -307,6 +318,21 @@
 
   <h2>Per-section data source</h2>
   <p class="sub" style="margin-top:-6px">Team tickets by individual can use Live Neutara Ticketing or your Uploaded Excel. Pick using the toggle shown at the top of that tab.</p>
+
+  <h2>Shift Leads</h2>
+  <p class="sub" style="margin-top:-6px">Add, rename, or remove shift leads and set each one's shift window (IST) — tracked for the Shift Lead tab's assignment-performance metrics. Saved in this browser only.</p>
+  <div class="panel" style="max-width:640px;margin-bottom:14px;">
+    <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      Jump to a lead's panel
+      <select id="slSettingsJumpToLeadSelect" style="flex:1;min-width:200px;"></select>
+      <button type="button" class="secondary" id="slSettingsJumpToLeadBtn">Go</button>
+    </label>
+  </div>
+  <div id="slLeadRosterSection"></div>
+
+  <h2>Engineer Roster</h2>
+  <p class="sub" style="margin-top:-6px">Which Shift Lead currently owns each engineer — editable. Saved in this browser only.</p>
+  <div id="slEngineerRosterSection"></div>
 </div>
 
 <script src="/shared/constants.js"></script>
