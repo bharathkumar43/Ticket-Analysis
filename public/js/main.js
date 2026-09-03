@@ -26,6 +26,9 @@ async function loadTabIfNeeded(tabId, force) {
     case 'page-teamtickets':
       await loadTeamTicketsSection();
       break;
+    case 'page-customereng':
+      await loadCustomerEngSection();
+      break;
     case 'page-shiftlead':
       await loadUnassignedDevSection();
       // Overview hero row defaults to the full all-time Dev dataset from Neutara (not

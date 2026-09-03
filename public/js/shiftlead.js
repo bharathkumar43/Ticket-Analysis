@@ -10,29 +10,35 @@
 // assignment (the Shift Lead, when it's an initial null -> engineer assignment); its
 // `createdAt` is the real assignment timestamp; its `oldValue` on a later re-assignment of the
 // same ticket is the previous assignee. See slParseAssignmentEvents.
-// `domain` is each Shift Lead's designated product ownership (per team spec, not inferred
-// from ticket mix) — the baseline that Cross-Assignment % below is measured against: any
-// ticket this lead assigned whose productType doesn't match their domain counts as a
-// cross-assignment (this lead handling/routing outside their own product area).
+// `projectScope` is which project(s) a Shift Lead is responsible for — 'SMB', 'ENT', or
+// 'Both' (the night shift covers both) — per team spec, confirmed as team-membership-based:
+// there's no ticket-level SMB/ENT field in Neutara, so a ticket's project is simply whichever
+// project the assignee's team covers. This is the baseline Cross-Assignment % below is
+// measured against: a lead assigning to an engineer outside their own project scope counts
+// as a cross-assignment. Replaces the old product-type `domain` field (Content/Email/
+// Messaging) — the current team spec has every lead covering all product types, so
+// product-type-based cross-assignment tracking no longer applies.
 // `shiftWindow` (optional) is a lead's real working hours in IST, { startHour, endHour } in
 // 24h clock — used to scope "Avg. Assignment Time" to only the assignments they actually
 // made during their shift (see slIsInShiftWindowIst). Overnight windows (end < start) wrap
-// past midnight, e.g. Abhinandan's 19:00 (7pm) to 04:00 (4am).
+// past midnight, e.g. Rehan's night shift 21:00 (9pm) to 06:00 (6am).
 //
 // This roster is EDITABLE via the "Shift Leads Roster" UI block (add/rename/remove a lead,
 // set/clear their shift window) — DEFAULT_SHIFT_LEADS below is only the seed used the first
 // time the app runs in a browser with nothing saved yet. After that, SHIFT_LEADS is loaded
 // from/saved to localStorage (slLoadShiftLeadsRoster/slSaveShiftLeadsRoster) and every reader
-// in this file treats it as a plain mutable array — nothing here assumes exactly these 4
+// in this file treats it as a plain mutable array — nothing here assumes exactly these 3
 // leads or these exact keys, so adding/removing a lead is safe everywhere `SHIFT_LEADS` is
 // read (see slRebuildShiftLeadTabs for the one place the DOM structure adapts to roster size).
 const DEFAULT_SHIFT_LEADS = [
-  { key: 'abhinandan', name: 'Abhinandan Kumar', domain: 'Messaging', shiftWindow: { startHour: 19, endHour: 4 } },
-  { key: 'ravi', name: 'Ravi Srivastava', domain: 'Content' },
-  { key: 'pragati', name: 'Pragati Pandey', domain: 'Messaging' },
-  { key: 'akhila', name: 'Akhila Aenkoju', domain: 'Messaging' },
+  { key: 'ravi', name: 'Ravi Srivastava', projectScope: 'SMB', shiftWindow: { startHour: 13, endHour: 22 } },
+  { key: 'shiva', name: 'Shiva Amuda', projectScope: 'ENT', shiftWindow: { startHour: 13, endHour: 22 } },
+  { key: 'rehan', name: 'Rehan Khan', projectScope: 'Both', shiftWindow: { startHour: 21, endHour: 6 } },
 ];
-const SL_LEADS_ROSTER_STORE_KEY = 'slShiftLeadsRoster';
+// SL_LEADS_ROSTER_STORE_KEY versioned (v2) so a browser with the old 4-lead roster saved
+// (Abhinandan/Ravi/Pragati/Akhila, product-type domains) discards it and picks up this new
+// 3-lead/project-scope structure automatically, rather than silently keeping the stale one.
+const SL_LEADS_ROSTER_STORE_KEY = 'slShiftLeadsRoster_v2';
 
 function slSlugifyLeadKey(name, existingKeys) {
   const base = (name || 'lead').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'lead';
@@ -51,31 +57,34 @@ function slSaveShiftLeadsRoster(roster) {
   localStorage.setItem(SL_LEADS_ROSTER_STORE_KEY, JSON.stringify(roster));
 }
 let SHIFT_LEADS = slLoadShiftLeadsRoster();
-// The only engineers a Shift Lead may assign a ticket to, per team spec — used to render the
-// roster reference and to recognize real assignment events as in-scope.
+// The only engineers a Shift Lead may assign a ticket to, per team spec — each tagged with
+// which project(s) they're on (matches the owning lead's projectScope). Used to render the
+// roster reference, seed the Engineer Roster's default Shift Lead owner, and to recognize
+// real assignment events as in-scope.
 const SHIFT_LEAD_ENGINEERS = [
-  { name: 'Vamsi Malla', specialty: 'Messaging' },
-  { name: 'Shiva Amuda', specialty: 'Content' },
-  { name: 'K N V S Raj Kumar', specialty: 'Email' },
-  { name: 'Lakshmi Adabala', specialty: 'Email' },
-  { name: 'Adari Venkata Jaswanth', specialty: 'Content' },
-  { name: 'Abhinandan Kumar', specialty: 'Messaging' },
-  { name: 'Pragati Pandey', specialty: 'Messaging' },
-  { name: 'Vishal Kumar', specialty: 'Content' },
-  { name: 'Srinu Gudimitla', specialty: 'Content' },
-  { name: 'Ravi Kumar Srivastava', specialty: 'Content' },
-  { name: 'Naved', specialty: 'Content' },
-  { name: 'Akhila', specialty: 'Content' },
-  { name: 'Rehan Khan', specialty: 'Content' },
-  { name: 'Bhagyashri Vitthal Deokar', specialty: 'Email' },
-  { name: 'Kantam Hemadasu', specialty: 'Messaging' },
+  // SMB team (Ravi Srivastava, 1pm-10pm IST)
+  { name: 'Akhila', projectScope: 'SMB' },
+  { name: 'Jashwant', projectScope: 'SMB' },
+  { name: 'Sai Raj', projectScope: 'SMB' },
+  // ENT team (Shiva Amuda, 1pm-10pm IST)
+  { name: 'Shivam', projectScope: 'ENT' },
+  { name: 'Naved', projectScope: 'ENT' },
+  { name: 'Pragati', projectScope: 'ENT' },
+  { name: 'Vishal', projectScope: 'ENT' },
+  // Night shift, ENT + SMB (Rehan Khan, 9pm-6am IST)
+  { name: 'Srinu', projectScope: 'Both' },
+  { name: 'Vamsi', projectScope: 'Both' },
+  { name: 'Lakshmi', projectScope: 'Both' },
 ];
 // Which Shift Lead currently owns each engineer — editable in the UI (Engineer Roster block),
 // persisted in this browser's localStorage (no server-side store for this yet, matching the
 // pattern already used by the Leader Metrics tab). Shape: { [engineerName]: leadKey | '' }.
 // Not derived from ticket data — this is who's actually accountable for each engineer's
 // queue, a team-structure fact this app has no other source for.
-const SL_ENGINEER_ROSTER_STORE_KEY = 'slEngineerRosterOwners';
+// Versioned (v2) alongside the roster key above, for the same reason: discard any old
+// (Content/Email/Messaging-specialty-based) saved mapping rather than mixing it with the new
+// project-scope-based one.
+const SL_ENGINEER_ROSTER_STORE_KEY = 'slEngineerRosterOwners_v2';
 
 function slLoadEngineerRosterOwners() {
   try { return JSON.parse(localStorage.getItem(SL_ENGINEER_ROSTER_STORE_KEY)) || {}; }
@@ -85,15 +94,12 @@ function slSaveEngineerRosterOwners(owners) {
   localStorage.setItem(SL_ENGINEER_ROSTER_STORE_KEY, JSON.stringify(owners));
 }
 // Default seed applied only the FIRST time (i.e. only for engineers with no saved value yet):
-// match by specialty only where it's unambiguous — Content -> Ravi (the only Content-domain
-// lead). Email has no owning lead and Messaging has 3 (Abhinandan/Pragati/Akhila), so those
-// stay unassigned rather than guessing; a human picks from the dropdown instead.
-function slDefaultLeadKeyForSpecialty(specialty) {
-  if (specialty === 'Content') {
-    const contentLead = SHIFT_LEADS.find(l => l.domain === 'Content');
-    return contentLead ? contentLead.key : '';
-  }
-  return '';
+// per team spec, every engineer's project scope maps to exactly one lead (SMB->Ravi,
+// ENT->Shiva, Both/Night->Rehan) — unlike the old product-type specialty (which had 3
+// Messaging-domain leads and no Email-domain lead), this mapping is always unambiguous.
+function slDefaultLeadKeyForSpecialty(projectScope) {
+  const scopedLead = SHIFT_LEADS.find(l => l.projectScope === projectScope);
+  return scopedLead ? scopedLead.key : '';
 }
 function slGetEngineerOwner(engineerName) {
   const owners = slLoadEngineerRosterOwners();
@@ -157,16 +163,33 @@ function slDomainForProductType(productType) {
   return null;
 }
 
+// Looks up an engineer's project scope ('SMB' | 'ENT' | 'Both') from SHIFT_LEAD_ENGINEERS by
+// name — case-insensitive, matches on either a full-name field or a first-name-only entry
+// (this app's engineer list mixes both, e.g. "Akhila" vs. "Akhila Aenkoju" elsewhere), since
+// real assignedTo values come from Neutara's activity history and may not exactly match the
+// short names used in the roster.
+function slEngineerProjectScope(engineerName) {
+  if (!engineerName) return null;
+  const needle = engineerName.trim().toLowerCase();
+  const eng = SHIFT_LEAD_ENGINEERS.find(e => {
+    const n = e.name.trim().toLowerCase();
+    return n === needle || needle.startsWith(n + ' ') || n.startsWith(needle + ' ');
+  });
+  return eng ? eng.projectScope : null;
+}
+
 // Cross-Assignment % for one Shift Lead: of the tickets they assigned (assignedRows), how
-// many carry a productType outside their own designated `domain` — i.e. tickets that, per
-// team spec, should have been routed to the Content/Email/Messaging lead who actually owns
-// that domain. Tickets whose productType doesn't normalize to a known domain are excluded
-// from both the numerator and denominator (not counted as either in- or cross-domain).
-function slComputeCrossAssignment(assignedRows, leadDomain) {
-  if (!leadDomain) return { inDomain: 0, crossDomain: 0, classified: 0, crossPct: null, inDomainPct: null, crossRows: [], inDomainRows: [] };
-  const classifiedRows = assignedRows.filter(r => slDomainForProductType(r.productType));
-  const crossRows = classifiedRows.filter(r => slDomainForProductType(r.productType) !== leadDomain);
-  const inDomainRows = classifiedRows.filter(r => slDomainForProductType(r.productType) === leadDomain);
+// many went to an engineer OUTSIDE their own designated `projectScope` — i.e. tickets that,
+// per team spec, should have stayed within their own SMB/ENT/Both team. Rehan (projectScope
+// 'Both') never cross-assigns by this measure — anyone he assigns to is in-scope, since his
+// team covers both projects. Rows whose assignee's project scope can't be determined (not in
+// SHIFT_LEAD_ENGINEERS, or unassigned) are excluded from both the numerator and denominator.
+function slComputeCrossAssignment(assignedRows, leadProjectScope) {
+  if (!leadProjectScope) return { inDomain: 0, crossDomain: 0, classified: 0, crossPct: null, inDomainPct: null, crossRows: [], inDomainRows: [] };
+  const isInScope = (assigneeScope) => leadProjectScope === 'Both' || assigneeScope === 'Both' || assigneeScope === leadProjectScope;
+  const classifiedRows = assignedRows.filter(r => slEngineerProjectScope(r.assignedTo));
+  const crossRows = classifiedRows.filter(r => !isInScope(slEngineerProjectScope(r.assignedTo)));
+  const inDomainRows = classifiedRows.filter(r => isInScope(slEngineerProjectScope(r.assignedTo)));
   const classified = classifiedRows.length;
   return {
     inDomain: inDomainRows.length,
@@ -447,9 +470,9 @@ function slAssignmentLogTableHtml(title, rows, cls, shiftWindow) {
   </div>`;
 }
 
-// Engineer Roster block: one row per engineer (name + product specialty, both fixed in code
-// — see SHIFT_LEAD_ENGINEERS), with an editable "Shift Lead" dropdown next to each showing
-// who currently owns them. Saved to localStorage on change (slSaveEngineerRosterOwners); the
+// Engineer Roster block: one row per engineer (name + project scope, both fixed in code —
+// see SHIFT_LEAD_ENGINEERS), with an editable "Shift Lead" dropdown next to each showing who
+// currently owns them. Saved to localStorage on change (slSaveEngineerRosterOwners); the
 // first time an engineer is rendered with no saved value yet, the dropdown defaults per
 // slDefaultLeadKeyForSpecialty but nothing is written to storage until the user actually
 // picks something — so "unassigned" stays genuinely unassigned, not silently auto-saved.
@@ -457,21 +480,21 @@ function slEngineerRosterTableHtml() {
   const owners = slLoadEngineerRosterOwners();
   const rowsHtml = SHIFT_LEAD_ENGINEERS.map(eng => {
     const saved = Object.prototype.hasOwnProperty.call(owners, eng.name) ? owners[eng.name] : null;
-    const selectedKey = saved !== null ? saved : slDefaultLeadKeyForSpecialty(eng.specialty);
+    const selectedKey = saved !== null ? saved : slDefaultLeadKeyForSpecialty(eng.projectScope);
     const optionsHtml = ['<option value="">— Unassigned —</option>']
       .concat(SHIFT_LEADS.map(l => `<option value="${l.key}"${l.key === selectedKey ? ' selected' : ''}>${escapeHtml(l.name)}</option>`))
       .join('');
     return `<tr>
       <td>${escapeHtml(eng.name)}</td>
-      <td>${escapeHtml(eng.specialty)}</td>
+      <td>${escapeHtml(eng.projectScope)}</td>
       <td><select class="sl-roster-owner-select" data-engineer="${escapeHtml(eng.name)}">${optionsHtml}</select></td>
     </tr>`;
   }).join('');
   return `<div class="table-wrap"><div class="table-scroll"><table class="kpi-table">
-    <thead><tr><th>Engineer</th><th>Specialty</th><th>Shift Lead</th></tr></thead>
+    <thead><tr><th>Engineer</th><th>Project Scope</th><th>Shift Lead</th></tr></thead>
     <tbody>${rowsHtml}</tbody>
   </table></div></div>
-  <div class="kpi-block-hint" style="margin-top:6px;">Saved in this browser only — not synced across machines. Defaults to the only unambiguous specialty match (Content → Ravi Srivastava); Email and Messaging specialties have more than one possible lead and start Unassigned until picked here.</div>`;
+  <div class="kpi-block-hint" style="margin-top:6px;">Saved in this browser only — not synced across machines. Defaults to the lead who covers this engineer's project scope (SMB → Ravi Srivastava, ENT → Shiva Amuda, Both/Night → Rehan Khan).</div>`;
 }
 
 function slBuildEngineerRosterSection() {
@@ -495,13 +518,19 @@ document.addEventListener('change', (e) => {
 const SL_SHIFT_HOURS_OPTIONS = Array.from({ length: 24 }, (_, h) => h);
 function slFmtHourOption(h) { return `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`; }
 
+const SL_PROJECT_SCOPES = ['SMB', 'ENT', 'Both'];
+
 function slLeadRosterTableHtml() {
   const rowsHtml = SHIFT_LEADS.map((lead, idx) => {
     const hasWindow = !!lead.shiftWindow;
     const startOptions = SL_SHIFT_HOURS_OPTIONS.map(h => `<option value="${h}"${hasWindow && lead.shiftWindow.startHour === h ? ' selected' : ''}>${slFmtHourOption(h)}</option>`).join('');
     const endOptions = SL_SHIFT_HOURS_OPTIONS.map(h => `<option value="${h}"${hasWindow && lead.shiftWindow.endHour === h ? ' selected' : ''}>${slFmtHourOption(h)}</option>`).join('');
+    const scopeOptions = ['<option value="">— None —</option>']
+      .concat(SL_PROJECT_SCOPES.map(s => `<option value="${s}"${lead.projectScope === s ? ' selected' : ''}>${s}</option>`))
+      .join('');
     return `<tr data-lead-idx="${idx}">
       <td><input type="text" class="sl-roster-lead-name" data-lead-idx="${idx}" value="${escapeHtml(lead.name)}" style="width:100%;min-width:160px;"></td>
+      <td><select class="sl-roster-lead-scope" data-lead-idx="${idx}">${scopeOptions}</select></td>
       <td><label style="display:flex;align-items:center;gap:6px;white-space:nowrap;">
         <input type="checkbox" class="sl-roster-lead-shift-toggle" data-lead-idx="${idx}"${hasWindow ? ' checked' : ''}> Set shift
       </label></td>
@@ -519,7 +548,7 @@ function slLeadRosterTableHtml() {
     </tr>`;
   }).join('');
   return `<div class="table-wrap"><div class="table-scroll"><table class="kpi-table">
-    <thead><tr><th>Name</th><th>Shift Window</th><th></th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Project Scope</th><th>Shift Window</th><th></th><th></th></tr></thead>
     <tbody>${rowsHtml}</tbody>
   </table></div></div>
   <div class="kpi-add-project" style="margin-top:10px;">
@@ -528,7 +557,7 @@ function slLeadRosterTableHtml() {
       <button type="button" class="primary" id="slAddLeadBtn">Add Shift Lead</button>
     </div>
   </div>
-  <div class="kpi-block-hint" style="margin-top:6px;">Saved in this browser only — not synced across machines. Domain (used for Cross-Assignment tracking) isn't editable here yet; a newly added lead has no domain until set in code.</div>`;
+  <div class="kpi-block-hint" style="margin-top:6px;">Saved in this browser only — not synced across machines. Project Scope (SMB/ENT/Both) is what Cross-Assignment tracking measures against — a lead assigning outside their own project scope counts as a cross-assignment; "Both" (night shift) never cross-assigns by definition.</div>`;
 }
 
 function slBuildLeadRosterSection() {
@@ -610,7 +639,7 @@ document.addEventListener('click', (e) => {
     const name = input.value.trim();
     if (!name) { input.focus(); return; }
     const key = slSlugifyLeadKey(name, SHIFT_LEADS.map(l => l.key));
-    SHIFT_LEADS.push({ key, name, domain: null, shiftWindow: null });
+    SHIFT_LEADS.push({ key, name, projectScope: null, shiftWindow: null });
     slActiveLeadKey = key; // jump to the newly added lead's tab
     slPersistRosterAndRebuild();
     return;
@@ -651,11 +680,20 @@ document.addEventListener('change', (e) => {
     }
     return;
   }
+  const scopeSelect = e.target.closest('.sl-roster-lead-scope');
+  if (scopeSelect) {
+    const idx = Number(scopeSelect.dataset.leadIdx);
+    if (SHIFT_LEADS[idx]) {
+      SHIFT_LEADS[idx].projectScope = scopeSelect.value || null;
+      slPersistRosterAndRebuild();
+    }
+    return;
+  }
   const shiftToggle = e.target.closest('.sl-roster-lead-shift-toggle');
   if (shiftToggle) {
     const idx = Number(shiftToggle.dataset.leadIdx);
     if (SHIFT_LEADS[idx]) {
-      SHIFT_LEADS[idx].shiftWindow = shiftToggle.checked ? { startHour: 19, endHour: 4 } : null;
+      SHIFT_LEADS[idx].shiftWindow = shiftToggle.checked ? { startHour: 13, endHour: 22 } : null;
       slPersistRosterAndRebuild();
     }
     return;
@@ -760,117 +798,36 @@ function slGroupRowsByWeek(rows) {
   });
   return Array.from(byWeek.entries()).sort((a, b) => b[0].localeCompare(a[0])); // newest week first
 }
-// Per-engineer breakdown within one week's rows: how many tickets each engineer (the
-// "person" assignedTo) received from this lead that week, resolution rate, avg resolution time.
-function slPersonBreakdownHtml(weekRows) {
-  const byPerson = new Map();
-  weekRows.forEach(r => {
-    const person = (r.assignedTo && r.assignedTo.trim()) || 'Unassigned';
-    if (!byPerson.has(person)) byPerson.set(person, []);
-    byPerson.get(person).push(r);
-  });
-  const people = Array.from(byPerson.entries()).sort((a, b) => b[1].length - a[1].length);
-  const rowsHtml = people.map(([person, prows]) => {
-    const resolved = prows.filter(r => (r.isResolved !== undefined ? r.isResolved : !!r.resolvedAt));
-    const resTimes = resolved.map(r => r.resolutionMinutes).filter(v => v !== null && v !== undefined);
-    const avgRes = resTimes.length ? resTimes.reduce((a, b) => a + b, 0) / resTimes.length : null;
-    const assignTimes = prows.map(r => slMinutesBetween(r.createdAt, r.assignedAt)).filter(v => v !== null);
-    const avgAssign = assignTimes.length ? assignTimes.reduce((a, b) => a + b, 0) / assignTimes.length : null;
-    return `<tr>
-      <td>${escapeHtml(person)}</td>
-      <td>${prows.length}</td>
-      <td>${slFmtMinutes(avgAssign)}</td>
-      <td>${resolved.length}/${prows.length}</td>
-      <td>${slFmtPct(slPct(resolved.length, prows.length))}</td>
-      <td>${slFmtMinutes(avgRes)}</td>
-    </tr>`;
-  }).join('');
-  return `<div class="table-scroll"><table class="kpi-table">
-    <thead><tr><th>Person (Engineer)</th><th>Tickets Received</th><th>Avg. Assignment Time</th><th>Resolved</th><th>Resolution Rate</th><th>Avg. Resolution Time</th></tr></thead>
-    <tbody>${rowsHtml}</tbody>
-  </table></div>`;
-}
 // Shared bar-chart constants: how many recent weeks to plot, and the fixed color assigned
 // to each Shift Lead (index-matched to SHIFT_LEADS) so a lead's color stays consistent
 // across the single-lead chart and the cross-lead comparison chart.
 const SL_CHART_MAX_WEEKS = 8;
 const SL_LEAD_COLORS = ['#2563eb', '#f97316', '#16a34a', '#a855f7'];
 
-function slWeekWiseReportHtml(rows, shiftWindow) {
-  const weeks = slGroupRowsByWeek(rows);
-  if (!weeks.length) {
-    return `<div class="kpi-summary-block">
-      <div class="kpi-block-header kpi-head-both">Week-Wise Report</div>
-      <div class="empty-state">No dated rows to break down by week yet.</div>
-    </div>`;
-  }
-  // Collapsed by default (see slBuildEngineerRosterSection-style density pass) — this block
-  // alone can be N weeks x (scorecard + person table), so it's the single biggest contributor
-  // to a lead's panel feeling dense/overwhelming on first load.
-  // Only the most recent week opens expanded by default — older weeks collapse behind a
-  // <details> so switching to a lead's tab doesn't dump N weeks x (scorecard + person table)
-  // onto the page at once. Users can still open any older week on demand.
-  const blocksHtml = weeks.map(([weekStart, weekRows], idx) => {
-    const stats = slComputeLeadStats(weekRows, null, shiftWindow); // leadName null: self-assigned split not meaningful per-week here
-    const slaOk = stats.slaPct === null ? null : stats.slaPct >= 90;
-    const isCurrent = idx === 0;
-    const body = `
-      <div class="kpi-scorecard-grid" style="padding:12px;">
-        <div class="kpi-score-card"><div class="kpi-score-val">${stats.received}</div><div class="kpi-score-lbl">Received</div></div>
-        <div class="kpi-score-card"><div class="kpi-score-val">${stats.assigned}</div><div class="kpi-score-lbl">Assigned</div></div>
-        <div class="kpi-score-card ${slGoodClass(stats.stillUnassigned === 0 ? true : stats.stillUnassigned > 0 ? false : null)}"><div class="kpi-score-val">${stats.stillUnassigned}</div><div class="kpi-score-lbl">Still Unassigned</div></div>
-        <div class="kpi-score-card"><div class="kpi-score-val">${slFmtMinutes(stats.avgMinutes)}</div><div class="kpi-score-lbl">Avg. Assignment Time${shiftWindow ? ' <span class="kpi-block-hint">(in-shift)</span>' : ''}</div></div>
-        <div class="kpi-score-card"><div class="kpi-score-val">${slFmtMinutes(stats.medianMinutes)}</div><div class="kpi-score-lbl">Median Assignment Time${shiftWindow ? ' <span class="kpi-block-hint">(in-shift)</span>' : ''}</div></div>
-        <div class="kpi-score-card ${slGoodClass(slaOk)}"><div class="kpi-score-val">${slFmtPct(stats.slaPct)}</div><div class="kpi-score-lbl">Assignment SLA %${shiftWindow ? ' <span class="kpi-block-hint">(in-shift)</span>' : ''}</div></div>
-        <div class="kpi-score-card ${slGoodClass(stats.reassignments === 0 ? true : null)}"><div class="kpi-score-val">${stats.reassignments}</div><div class="kpi-score-lbl">Reassignments</div></div>
-      </div>
-      <div class="kpi-block-hint" style="margin:8px 0 4px;padding:0 12px;">By person (engineer) this week:</div>
-      ${slPersonBreakdownHtml(weekRows)}`;
-    return `<details class="kpi-week-collapsible"${isCurrent ? ' open' : ''}>
-      <summary><div class="kpi-block-header kpi-head-both">Week of ${slWeekLabel(weekStart)}${isCurrent ? ' <span class="kpi-block-hint">(most recent)</span>' : ''} <span class="kpi-block-hint">${weekRows.length} ticket${weekRows.length === 1 ? '' : 's'} received</span></div></summary>
-      ${body}
-    </details>`;
-  }).join('');
-  return `<details class="kpi-collapsible">
-    <summary><div class="kpi-block-header kpi-head-both">Week-Wise Report <span class="kpi-block-hint">${weeks.length} week${weeks.length === 1 ? '' : 's'} with activity, most recent first</span></div></summary>
-    <div class="kpi-summary-block" style="margin-top:0;">
-      ${slSingleLeadBarChartHtml(weeks)}
-      ${blocksHtml}
-    </div>
-  </details>`;
-}
-
-// Single-series bar chart: one bar per week (oldest -> newest, left to right) for one lead's
-// "tickets received" count, capped to the most recent N weeks so the chart stays readable.
-// Rendered at hero size (220-280px tall bars) — this is the centerpiece chart at the top of
-// a lead's own panel, matching the sizing of the cross-lead comparison chart.
-function slSingleLeadBarChartHtml(weeksNewestFirst, opts) {
-  const weeks = weeksNewestFirst.slice(0, SL_CHART_MAX_WEEKS).slice().reverse();
-  if (weeks.length < 2) return ''; // a chart isn't useful with only one data point
-  const counts = weeks.map(([, weekRows]) => weekRows.length);
-  const maxCount = Math.max(1, ...counts);
-  const barHeightPx = (opts && opts.heroSize) ? 240 : 80;
-  const barsHtml = weeks.map(([weekStart], i) => {
-    const count = counts[i];
-    const heightPct = Math.round((count / maxCount) * 100);
-    const isLatest = i === weeks.length - 1;
-    return `<div class="sl-chart-bar-col" style="flex:1;min-width:${(opts && opts.heroSize) ? 46 : 32}px;" title="${slWeekLabel(weekStart)}: ${count}">
-      <div class="sl-chart-bar-val">${count}</div>
-      <div style="width:100%;max-width:${(opts && opts.heroSize) ? 40 : 26}px;height:${barHeightPx}px;display:flex;align-items:flex-end;">
-        <div class="sl-chart-bar-fill" style="height:${heightPct}%;background:${isLatest ? '#2563eb' : '#93c5fd'};"></div>
-      </div>
-      <div class="sl-chart-bar-week">${slWeekLabel(weekStart).split(' – ')[0]}</div>
-    </div>`;
-  }).join('');
-  if (opts && opts.heroSize) {
-    return `<div class="sl-chart-panel">
-      <div class="sl-chart-title">Tickets Received per Week</div>
-      <div class="sl-chart-hint">${weeksNewestFirst.length > SL_CHART_MAX_WEEKS ? `Last ${SL_CHART_MAX_WEEKS} weeks` : 'All weeks with activity'}, most recent on the right</div>
-      <div class="sl-chart-plot sl-chart-plot-grid">${barsHtml}</div>
-    </div>`;
-  }
-  return `<div class="kpi-block-hint" style="padding:0 12px;">Tickets received per week${weeksNewestFirst.length > SL_CHART_MAX_WEEKS ? ` (last ${SL_CHART_MAX_WEEKS} weeks)` : ''}</div>
-    <div style="display:flex;gap:6px;padding:8px 12px 12px;align-items:flex-end;overflow-x:auto;">${barsHtml}</div>`;
+// One lead's own weekly "Tickets Received" chart (the centerpiece chart at the top of a
+// lead's own panel) — bars are stacked by product type (Content/Messaging/Email/No Product
+// Type), same as the Overview's per-lead charts, since this lead can and does assign all
+// combinations. weeksNewestFirst is [weekStart, weekRows][] pairs (from slGroupRowsByWeek).
+function slSingleLeadBarChartHtml(weeksNewestFirst) {
+  const weekPairs = weeksNewestFirst.slice(0, SL_CHART_MAX_WEEKS).slice().reverse();
+  if (weekPairs.length < 2) return ''; // a chart isn't useful with only one data point
+  const weeks = weekPairs.map(([weekStart]) => weekStart);
+  const domainCountsPerWeek = weekPairs.map(([, weekRows]) => {
+    const counts = { Content: 0, Messaging: 0, Email: 0, Other: 0 };
+    weekRows.forEach(r => {
+      const domain = slDomainForProductType(r.productType);
+      counts[domain && counts.hasOwnProperty(domain) ? domain : 'Other'] += 1;
+    });
+    return counts;
+  });
+  const maxCount = Math.max(1, ...domainCountsPerWeek.map(slDomainCountsTotal));
+  const barsHtml = slDomainBarsHtml(weeks, domainCountsPerWeek, maxCount, 240, weekStart => slWeekLabel(weekStart));
+  return `<div class="sl-chart-panel">
+    <div class="sl-chart-title">Tickets Received per Week</div>
+    <div class="sl-chart-hint">${weeksNewestFirst.length > SL_CHART_MAX_WEEKS ? `Last ${SL_CHART_MAX_WEEKS} weeks` : 'All weeks with activity'}, most recent on the right — each bar split by product type</div>
+    <div class="sl-chart-plot sl-chart-plot-grid">${barsHtml}</div>
+    <div class="sl-chart-legend" style="margin-top:10px;">${slDomainLegendHtml()}</div>
+  </div>`;
 }
 
 function buildShiftLeadPanel(leadKey) {
@@ -923,7 +880,7 @@ function buildShiftLeadPanel(leadKey) {
 
     <details class="kpi-collapsible">
       <summary><div class="kpi-block-header kpi-head-both">Tickets Received per Week</div></summary>
-      ${slSingleLeadBarChartHtml(weeksForChart, { heroSize: true })}
+      ${slSingleLeadBarChartHtml(weeksForChart)}
     </details>
 
     ${slScorecardHtml(leadName, stats)}
@@ -938,7 +895,6 @@ function buildShiftLeadPanel(leadKey) {
         <div style="padding:0 12px 12px;display:flex;flex-wrap:wrap;gap:8px;">${productTypeHtml || '<span class="kpi-block-hint">No data</span>'}</div>
       </div>
     </details>
-    ${slWeekWiseReportHtml(rows, lead.shiftWindow)}
     <details class="kpi-collapsible">
       <summary><div class="kpi-block-header kpi-head-both">Full Assignment Log <span class="kpi-block-hint">Every first-assignment this lead made, ticket by ticket</span></div></summary>
       ${slAssignmentLogTableHtml('First Assignments Made', rows, 'kpi-head-both', lead.shiftWindow)}
@@ -997,27 +953,107 @@ function slRangeFilterFromInputs(fromId, toId) {
 // 12-13px labels, a legend, and a baseline/gridline backdrop — not the old ~90px mini chart.
 // `standalone` (default true) wraps the plot in its own .sl-chart-panel with title/hint; pass
 // false to embed just the plot+legend inside an existing panel (used by the comparison block).
+// Product-type domain colors for the stacked segments below — a lead can (and does) assign
+// tickets of any of the 3 types, so each bar is split by domain rather than being one flat
+// color. Internal key stays 'Other' (used for lookups/filters throughout this file); only the
+// user-facing label is "No Product Type" (SL_DOMAIN_LABELS) — checked against this app's real
+// live data: 15,555 of 15,716 Dev tickets (99%) have no productType set in Neutara at all, so
+// this bucket is overwhelmingly missing data, not a genuine 4th ticket category.
+const SL_DOMAIN_COLORS = { Content: '#16a34a', Messaging: '#2563eb', Email: '#f97316', Other: '#9ca3af' };
+const SL_DOMAIN_LABELS = { Content: 'Content', Messaging: 'Messaging', Email: 'Email', Other: 'No Product Type' };
+const SL_DOMAIN_ORDER = ['Content', 'Messaging', 'Email', 'Other'];
+
+// Stacked-by-domain counts for one lead across a set of weeks — shared by both the combined
+// chart (slWeekWiseBarChartHtml) and the per-lead chart (slSingleLeadDomainChartHtml).
+function slDomainCountsPerWeek(rows, weeks) {
+  return weeks.map(weekStart => {
+    const weekRows = rows.filter(r => r.createdAt && slWeekStartIso(r.createdAt) === weekStart);
+    const counts = { Content: 0, Messaging: 0, Email: 0, Other: 0 };
+    weekRows.forEach(r => {
+      const domain = slDomainForProductType(r.productType);
+      counts[domain && counts.hasOwnProperty(domain) ? domain : 'Other'] += 1;
+    });
+    return counts;
+  });
+}
+function slDomainCountsTotal(counts) {
+  return SL_DOMAIN_ORDER.reduce((sum, d) => sum + counts[d], 0);
+}
+function slDomainLegendHtml() {
+  return SL_DOMAIN_ORDER.map(d =>
+    `<span class="sl-chart-legend-item">
+      <span class="sl-chart-legend-swatch" style="background:${SL_DOMAIN_COLORS[d]};"></span>${escapeHtml(SL_DOMAIN_LABELS[d])}
+    </span>`).join('');
+}
+// One stacked-by-domain bar per week for a single lead's rows — the building block reused by
+// both slSingleLeadDomainChartHtml (one small chart per lead) and, inline, by
+// slWeekWiseBarChartHtml's clustered version (one cluster per week, one bar per lead).
+function slDomainBarsHtml(weeks, domainCountsPerWeek, maxCount, barHeightPx, labelForWeek) {
+  return weeks.map((weekStart, wi) => {
+    const counts = domainCountsPerWeek[wi];
+    const total = slDomainCountsTotal(counts);
+    const titleParts = SL_DOMAIN_ORDER.filter(d => counts[d] > 0).map(d => `${SL_DOMAIN_LABELS[d]}: ${counts[d]}`);
+    const segmentsHtml = SL_DOMAIN_ORDER.filter(d => counts[d] > 0).map(d => {
+      const heightPct = Math.round((counts[d] / maxCount) * 100);
+      return `<div style="width:100%;height:${heightPct}%;background:${SL_DOMAIN_COLORS[d]};"></div>`;
+    }).join('');
+    return `<div class="sl-chart-bar-col" style="flex:1;min-width:22px;" title="${escapeHtml(labelForWeek(weekStart))} — ${total} total${titleParts.length ? ` (${titleParts.join(', ')})` : ''}">
+      <div class="sl-chart-bar-val">${total || ''}</div>
+      <div style="width:100%;max-width:26px;height:${barHeightPx}px;display:flex;flex-direction:column-reverse;align-items:stretch;">
+        ${segmentsHtml}
+      </div>
+      <div style="font-size:10px;color:#6b7280;white-space:nowrap;">${slWeekLabel(weekStart).split(' – ')[0]}</div>
+    </div>`;
+  }).join('');
+}
+
+// One small stacked-by-domain chart per lead — used instead of one combined chart so each
+// lead's own weekly trend/mix is readable on its own rather than squeezed into a shared cluster.
+function slSingleLeadDomainChartHtml(lead, rows, weeksNewestFirst) {
+  const weeks = weeksNewestFirst.slice(0, SL_CHART_MAX_WEEKS).slice().reverse();
+  if (!weeks.length) return `<div class="sl-chart-panel"><div class="sl-chart-title">${escapeHtml(lead.name)}</div><div class="empty-state">No dated rows to break down by week yet.</div></div>`;
+  const domainCountsPerWeek = slDomainCountsPerWeek(rows, weeks);
+  const maxCount = Math.max(1, ...domainCountsPerWeek.map(slDomainCountsTotal));
+  const barsHtml = slDomainBarsHtml(weeks, domainCountsPerWeek, maxCount, 160, weekStart => slWeekLabel(weekStart));
+  return `<div class="sl-chart-panel" style="flex:1;min-width:260px;">
+    <div class="sl-chart-title">${escapeHtml(lead.name)}</div>
+    <div style="display:flex;gap:6px;align-items:flex-end;overflow-x:auto;padding-top:8px;">${barsHtml}</div>
+  </div>`;
+}
+
+// One chart per lead, laid out side by side (wraps on narrow screens) — the "shift lead wise"
+// view: each lead's weekly product-type mix is its own self-contained chart instead of being
+// grouped into shared week clusters.
+function slPerLeadDomainChartsHtml(rowsByLead, weeksNewestFirst) {
+  if (!weeksNewestFirst.length) return '<div class="empty-state">No dated rows to break down by week yet.</div>';
+  const chartsHtml = rowsByLead.map(({ lead, rows }) => slSingleLeadDomainChartHtml(lead, rows, weeksNewestFirst)).join('');
+  return `<div style="display:flex;gap:12px;flex-wrap:wrap;">${chartsHtml}</div>
+    <div class="sl-chart-legend" style="margin-top:10px;">${slDomainLegendHtml()}</div>`;
+}
+
 function slWeekWiseBarChartHtml(rowsByLead, weeksNewestFirst, opts) {
   const standalone = !opts || opts.standalone !== false;
   const weeks = weeksNewestFirst.slice(0, SL_CHART_MAX_WEEKS).slice().reverse(); // oldest -> newest for left-to-right reading
   if (!weeks.length) return standalone ? '<div class="empty-state">No dated rows to break down by week yet.</div>' : '';
-  const perWeekCounts = weeks.map(weekStart =>
-    rowsByLead.map(({ rows }) => rows.filter(r => r.createdAt && slWeekStartIso(r.createdAt) === weekStart).length));
-  const maxCount = Math.max(1, ...perWeekCounts.flat());
-  const legendHtml = rowsByLead.map(({ lead }, i) =>
-    `<span class="sl-chart-legend-item">
-      <span class="sl-chart-legend-swatch" style="background:${SL_LEAD_COLORS[i % SL_LEAD_COLORS.length]};"></span>${escapeHtml(lead.name)}
-    </span>`).join('');
+  const perWeekDomainCounts = weeks.map(weekStart =>
+    rowsByLead.map(({ rows }) => slDomainCountsPerWeek(rows, [weekStart])[0]));
+  const maxCount = Math.max(1, ...perWeekDomainCounts.flat().map(slDomainCountsTotal));
+  const leadLegendHtml = rowsByLead.map(({ lead }) => `<span class="sl-chart-legend-item">${escapeHtml(lead.name)}</span>`).join(' · ');
   const barHeightPx = 240;
   const clustersHtml = weeks.map((weekStart, wi) => {
-    const counts = perWeekCounts[wi];
+    const domainCountsByLead = perWeekDomainCounts[wi];
     const barsHtml = rowsByLead.map(({ lead }, i) => {
-      const count = counts[i];
-      const heightPct = Math.round((count / maxCount) * 100);
-      return `<div class="sl-chart-bar-col" style="flex:1;min-width:22px;" title="${escapeHtml(lead.name)}: ${count}">
-        <div class="sl-chart-bar-val">${count || ''}</div>
-        <div style="width:100%;max-width:26px;height:${barHeightPx}px;display:flex;align-items:flex-end;">
-          <div class="sl-chart-bar-fill" style="height:${heightPct}%;background:${SL_LEAD_COLORS[i % SL_LEAD_COLORS.length]};"></div>
+      const counts = domainCountsByLead[i];
+      const total = slDomainCountsTotal(counts);
+      const titleParts = SL_DOMAIN_ORDER.filter(d => counts[d] > 0).map(d => `${SL_DOMAIN_LABELS[d]}: ${counts[d]}`);
+      const segmentsHtml = SL_DOMAIN_ORDER.filter(d => counts[d] > 0).map(d => {
+        const heightPct = Math.round((counts[d] / maxCount) * 100);
+        return `<div style="width:100%;height:${heightPct}%;background:${SL_DOMAIN_COLORS[d]};"></div>`;
+      }).join('');
+      return `<div class="sl-chart-bar-col" style="flex:1;min-width:22px;" title="${escapeHtml(lead.name)} — ${total} total${titleParts.length ? ` (${titleParts.join(', ')})` : ''}">
+        <div class="sl-chart-bar-val">${total || ''}</div>
+        <div style="width:100%;max-width:26px;height:${barHeightPx}px;display:flex;flex-direction:column-reverse;align-items:stretch;">
+          ${segmentsHtml}
         </div>
       </div>`;
     }).join('');
@@ -1027,10 +1063,11 @@ function slWeekWiseBarChartHtml(rowsByLead, weeksNewestFirst, opts) {
     </div>`;
   }).join('');
   const body = `<div class="sl-chart-plot sl-chart-plot-grid">${clustersHtml}</div>
-    <div class="sl-chart-legend">${legendHtml}</div>`;
+    <div class="sl-chart-legend">${slDomainLegendHtml()}</div>
+    <div class="kpi-block-hint" style="margin-top:2px;">Bars, left to right within each week: ${leadLegendHtml}</div>`;
   if (!standalone) return body;
   return `<div class="sl-chart-title">Tickets Received per Week, by Shift Lead</div>
-    <div class="sl-chart-hint">${weeksNewestFirst.length > SL_CHART_MAX_WEEKS ? `Last ${SL_CHART_MAX_WEEKS} weeks` : 'All weeks with activity'}, most recent on the right</div>
+    <div class="sl-chart-hint">${weeksNewestFirst.length > SL_CHART_MAX_WEEKS ? `Last ${SL_CHART_MAX_WEEKS} weeks` : 'All weeks with activity'}, most recent on the right — each bar split by product type since a lead can assign any type</div>
     ${body}`;
 }
 
@@ -1356,9 +1393,11 @@ function slBuildHeroSection() {
   const weeks = Array.from(allWeeks).sort((a, b) => b.localeCompare(a));
 
   if (chartPanel) {
-    chartPanel.innerHTML = weeks.length
-      ? slWeekWiseBarChartHtml(rowsByLead, weeks, { standalone: true })
-      : '<div class="empty-state">No dated rows to break down by week yet.</div>';
+    // One separate chart per Shift Lead (not one combined chart with grouped bars) — each
+    // lead's own weekly trend and product-type mix is easier to read on its own.
+    chartPanel.innerHTML = `<div class="sl-chart-title">Tickets Received per Week, by Shift Lead</div>
+      <div class="sl-chart-hint">${weeks.length > SL_CHART_MAX_WEEKS ? `Last ${SL_CHART_MAX_WEEKS} weeks` : 'All weeks with activity'}, most recent on the right — each bar split by product type since a lead can assign any type</div>
+      ${slPerLeadDomainChartsHtml(rowsByLead, weeks)}`;
   }
 
   if (heroRow) {
@@ -1425,7 +1464,7 @@ function slCompareCardData() {
     const productTypeCounts = {};
     assignedRows.forEach(r => { const p = r.productType || 'Unknown'; productTypeCounts[p] = (productTypeCounts[p] || 0) + 1; });
     const productTypeEntries = Object.entries(productTypeCounts).sort((a, b) => b[1] - a[1]);
-    const crossAssign = slComputeCrossAssignment(assignedRows, lead.domain);
+    const crossAssign = slComputeCrossAssignment(assignedRows, lead.projectScope);
     return { lead, rows, stats, assignedRows, unassignedRows, productTypeEntries, crossAssign };
   });
 }
@@ -1445,13 +1484,15 @@ function buildShiftLeadComparisonTable() {
         }).join('')
       : '<span class="kpi-block-hint">No data</span>';
     const crossOk = crossAssign.crossPct === null ? null : crossAssign.crossDomain === 0;
-    const crossValHtml = !lead.domain
+    const crossValHtml = !lead.projectScope
       ? '<span class="kpi-block-hint">N/A</span>'
+      : lead.projectScope === 'Both'
+      ? '<span class="kpi-block-hint">N/A (covers both)</span>'
       : crossAssign.classified === 0
       ? '<span class="kpi-block-hint">No data</span>'
-      : `${slClickableCount(crossAssign.crossDomain, crossAssign.crossRows, `${lead.name} — Cross-Assigned (outside ${lead.domain})`)} (${slFmtPct(crossAssign.crossPct)})`;
+      : `${slClickableCount(crossAssign.crossDomain, crossAssign.crossRows, `${lead.name} — Cross-Assigned (outside ${lead.projectScope})`)} (${slFmtPct(crossAssign.crossPct)})`;
     return `<div class="sl-lead-compare-card">
-      <div class="sl-lead-compare-name">${escapeHtml(lead.name)}${lead.domain ? ` <span class="kpi-block-hint">(${escapeHtml(lead.domain)})</span>` : ''}</div>
+      <div class="sl-lead-compare-name">${escapeHtml(lead.name)}${lead.projectScope ? ` <span class="kpi-block-hint">(${escapeHtml(lead.projectScope)})</span>` : ''}</div>
       <div class="sl-lead-compare-metrics">
         <div class="sl-lead-compare-metric"><div class="sl-lead-compare-val">${slClickableCount(stats.received, rows, `${lead.name} — Received`)}</div><div class="sl-lead-compare-lbl">Received</div></div>
         <div class="sl-lead-compare-metric"><div class="sl-lead-compare-val">${slClickableCount(stats.assigned, assignedRows, `${lead.name} — Assigned`)}</div><div class="sl-lead-compare-lbl">Assigned</div></div>
@@ -1481,13 +1522,14 @@ function buildShiftLeadComparisonTable() {
 function slDownloadCompareCsv() {
   const cardData = slCompareCardData();
   const allProductTypes = Array.from(new Set(cardData.flatMap(d => d.productTypeEntries.map(([p]) => p)))).sort();
-  const header = ['Shift Lead', 'Domain', 'Received', 'Assigned', 'Still Unassigned', 'Avg Assign Time (min)', 'Shift-Scoped', 'Assignment SLA %', 'Ticket SLA Breaches', 'Ticket SLA Breach %', 'Distinct Product Types', 'Cross-Assigned Tickets', 'Cross-Assigned %', 'Not Cross-Assigned %', ...allProductTypes.map(p => `Product Type: ${p}`)];
+  const header = ['Shift Lead', 'Project Scope', 'Received', 'Assigned', 'Still Unassigned', 'Avg Assign Time (min)', 'Shift-Scoped', 'Assignment SLA %', 'Ticket SLA Breaches', 'Ticket SLA Breach %', 'Distinct Product Types', 'Cross-Assigned Tickets', 'Cross-Assigned %', 'Not Cross-Assigned %', ...allProductTypes.map(p => `Product Type: ${p}`)];
   const lines = [header.map(slCsvField).join(',')];
   cardData.forEach(({ lead, stats, productTypeEntries, crossAssign }) => {
     const countByType = Object.fromEntries(productTypeEntries);
+    const crossApplies = lead.projectScope && lead.projectScope !== 'Both';
     lines.push([
       lead.name,
-      lead.domain || 'N/A',
+      lead.projectScope || 'N/A',
       stats.received,
       stats.assigned,
       stats.stillUnassigned,
@@ -1497,9 +1539,9 @@ function slDownloadCompareCsv() {
       stats.slaTrackedCount ? stats.ticketSlaBreachCount : 'N/A',
       stats.ticketSlaBreachPct === null ? 'N/A' : stats.ticketSlaBreachPct.toFixed(1),
       productTypeEntries.length,
-      lead.domain ? crossAssign.crossDomain : 'N/A',
-      lead.domain && crossAssign.crossPct !== null ? crossAssign.crossPct.toFixed(1) : 'N/A',
-      lead.domain && crossAssign.inDomainPct !== null ? crossAssign.inDomainPct.toFixed(1) : 'N/A',
+      crossApplies ? crossAssign.crossDomain : 'N/A',
+      crossApplies && crossAssign.crossPct !== null ? crossAssign.crossPct.toFixed(1) : 'N/A',
+      crossApplies && crossAssign.inDomainPct !== null ? crossAssign.inDomainPct.toFixed(1) : 'N/A',
       ...allProductTypes.map(p => countByType[p] || 0),
     ].map(slCsvField).join(','));
   });
@@ -1542,22 +1584,22 @@ function slDownloadCompareImage() {
       return [lead.name, ...allProductTypes.map(p => countByType[p] || 0)];
     }),
   } : null;
-  // Cross-Assignment section: for each lead with a designated domain, how many of their
-  // assigned tickets fall outside that domain (should have been routed to the Content/
-  // Email/Messaging lead who owns it), as a count and %, plus the inverse "stayed in
-  // domain" % so a 0% cross-assign rate reads as compliant rather than as missing data.
+  // Cross-Assignment section: for each lead with a single-project scope (SMB or ENT — not
+  // 'Both', which never cross-assigns by definition), how many of their assigned tickets went
+  // to an engineer outside that project scope, as a count and %, plus the inverse "stayed
+  // in-scope" % so a 0% cross-assign rate reads as compliant rather than as missing data.
   const crossSection = {
-    heading: 'Cross-Assignment (vs. designated domain)',
-    columns: ['Shift Lead', 'Domain', 'Cross-Assigned', 'Cross-Assigned %', 'Not Cross-Assigned %'],
-    rows: cardData.map(({ lead, crossAssign }) => lead.domain
+    heading: 'Cross-Assignment (vs. project scope)',
+    columns: ['Shift Lead', 'Project Scope', 'Cross-Assigned', 'Cross-Assigned %', 'Not Cross-Assigned %'],
+    rows: cardData.map(({ lead, crossAssign }) => (lead.projectScope && lead.projectScope !== 'Both')
       ? [
           lead.name,
-          lead.domain,
+          lead.projectScope,
           crossAssign.classified ? crossAssign.crossDomain : '—',
           crossAssign.crossPct === null ? 'N/A' : slFmtPct(crossAssign.crossPct),
           crossAssign.inDomainPct === null ? 'N/A' : slFmtPct(crossAssign.inDomainPct),
         ]
-      : [lead.name, 'N/A', 'N/A', 'N/A', 'N/A']),
+      : [lead.name, lead.projectScope || 'N/A', 'N/A', 'N/A', 'N/A']),
   };
   slDownloadImageReport('shift-leads-compared', 'Shift Leads Compared', productSection ? [mainSection, productSection, crossSection] : [mainSection, crossSection]);
 }
@@ -1696,7 +1738,13 @@ async function slOnHeroRangeChange() {
   const from = document.getElementById('shiftLeadHeroFromInput').value;
   const to = document.getElementById('shiftLeadHeroToInput').value;
   const { matchedCount } = await slFetchRowsForRange(from, to);
-  slBuildHeroSection();
+  // This is often the FIRST real data fetch on this tab (fires on first visit — see
+  // loadTabIfNeeded's page-shiftlead case in main.js). Each lead's own panel may have
+  // already rendered once with empty/local data before this fetch landed — rebuild
+  // everything now (slRebuildAllPanels already includes slBuildHeroSection) so "Tickets
+  // Received per Week" and every other per-lead figure reflects the real data instead of
+  // staying stuck at the pre-fetch (often all-zero) render.
+  slRebuildAllPanels();
   if (statusEl) {
     statusEl.textContent = from || to
       ? `Updated ${new Date().toLocaleString()} — ${matchedCount} Dev ticket${matchedCount === 1 ? '' : 's'} created/resolved in range`
@@ -1975,39 +2023,6 @@ async function slLoadFirstAssigneeReport() {
   slRebuildAllPanels();
 }
 
-// Shared context block — daily count of CF tickets newly created directly into Dev (last 14
-// days), computed client-side from the already-fetched main sync snapshot. Not per-lead
-// (ticket creation isn't a Shift Lead action) — just volume context alongside their activity.
-async function slLoadDailyCreatedToDevSection() {
-  const sectionEl = document.getElementById('devDailyCreatedSection');
-  const data = await Api.getNtaCurrent().catch(() => null);
-  if (!data) {
-    sectionEl.innerHTML = '<div class="empty-state">No Neutara Ticketing sync yet.</div>';
-    return;
-  }
-  const devCreated = data.issues.filter(i => i.cfKey && i.department === 'Dev' && i.fields.created);
-  const counts = new Map();
-  devCreated.forEach(i => {
-    const day = new Date(i.fields.created).toISOString().slice(0, 10);
-    counts.set(day, (counts.get(day) || 0) + 1);
-  });
-  const days = Array.from({ length: 14 }, (_, i) => addDaysIso(todayIso(), -i)).reverse();
-  const maxCount = Math.max(1, ...days.map(d => counts.get(d) || 0));
-  const barsHtml = days.map(d => {
-    const count = counts.get(d) || 0;
-    const heightPct = Math.round((count / maxCount) * 100);
-    const isToday = d === todayIso();
-    return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;min-width:36px;">
-      <div style="font-size:11px;font-weight:600;">${count}</div>
-      <div style="width:100%;max-width:28px;height:80px;display:flex;align-items:flex-end;">
-        <div style="width:100%;height:${heightPct}%;background:${isToday ? '#2563eb' : '#93c5fd'};border-radius:3px 3px 0 0;"></div>
-      </div>
-      <div style="font-size:10px;color:#6b7280;white-space:nowrap;">${fmtRangeDate(d)}</div>
-    </div>`;
-  }).join('');
-  sectionEl.innerHTML = `<div style="display:flex;gap:6px;padding:12px;align-items:flex-end;overflow-x:auto;">${barsHtml}</div>`;
-}
-
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('unassignedDevFromInput').value = todayIso();
   document.getElementById('unassignedDevToInput').value = todayIso();
@@ -2033,7 +2048,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('shiftLeadCompareToInput').value = '';
     slOnCompareRangeChange();
   });
-  slLoadDailyCreatedToDevSection();
   slBuildLeadRosterSection(); // Shift Leads Roster editor
   slRebuildShiftLeadTabs(); // builds tab bar/pages from SHIFT_LEADS, then calls slRebuildAllPanels + engineer roster
 });

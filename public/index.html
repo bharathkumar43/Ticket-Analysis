@@ -62,6 +62,7 @@
   <button class="tab-btn" data-tab="page-teamtickets">Team tickets by individual</button>
   <button class="tab-btn" data-tab="page-qateam">Leader Mertices</button>
   <button class="tab-btn" data-tab="page-rca">RCA Documents</button>
+  <button class="tab-btn" data-tab="page-customereng">Customer Engineering</button>
   <button class="tab-btn" data-tab="page-shiftlead">Shift Lead</button>
   <button class="tab-btn" data-tab="page-settings">Settings</button>
 </div>
@@ -171,6 +172,17 @@
   <div id="rcaDocsContainer"><div class="empty-state">No RCA documents added yet.</div></div>
 </div>
 
+<!-- ============================== CUSTOMER ENGINEERING ============================== -->
+<div class="tab-page" id="page-customereng">
+  <h2 id="customerEngHeading">Customer Engineering</h2>
+  <p class="sub" style="margin-top:-6px">Same data as the Customer Engineering section of "Team tickets by individual," pulled out into its own tab. A ticket counts if it was <b>created OR updated</b> in the selected date range. One row per person. <b>Breached</b> splits into <b>Retry</b> (summary contains retry/conflict(s)/"not moving"/stuck/"not picking") and <b>Non-retry</b>.</p>
+  <div class="table-toolbar" style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;">
+    <button class="secondary" id="refreshCustomerEngBtn">Refresh this tab's data</button>
+    <span id="customerEngStatus" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+  </div>
+  <div id="customerEngSection"><div class="empty-state">Switch to this tab to load — or click "Refresh this tab's data".</div></div>
+</div>
+
 <!-- ============================== SHIFT LEAD ============================== -->
 <div class="tab-page" id="page-shiftlead">
   <div class="sl-section-title">Overview <span class="kpi-block-hint">All 4 Shift Leads, current filter</span></div>
@@ -225,13 +237,6 @@
 
   <div class="sl-diagnostics-wrap">
     <div class="sl-diagnostics-label">Diagnostic tools &amp; raw data (secondary)</div>
-
-    <div class="kpi-summary-block" id="devDailyCreatedBlock">
-      <div class="kpi-block-header kpi-head-both">
-        Tickets Created to Dev — By Day <span class="kpi-block-hint">Daily count of CF tickets newly created directly into the Dev department (last 14 days), for context alongside Shift Lead assignment activity.</span>
-      </div>
-      <div id="devDailyCreatedSection"><div class="empty-state">Loading…</div></div>
-    </div>
 
     <details class="kpi-collapsible" id="unassignedDevBlock" style="display:none;">
       <summary>
@@ -343,6 +348,7 @@
 <script src="/js/settings.js"></script>
 <script src="/js/dashboard.js"></script>
 <script src="/js/teamtickets.js"></script>
+<script src="/js/customereng.js"></script>
 <script src="/js/leadermetrics.js"></script>
 <script src="/js/shiftlead.js"></script>
 <script src="/js/rca.js"></script>
